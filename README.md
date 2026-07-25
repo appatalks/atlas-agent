@@ -40,14 +40,14 @@ atsla
 | **Operator control** | Monitor, approve, autonomous, mute, takeover, and live-representative escalation controls. |
 | **Client isolation** | Public-only operation by default, then stable client-ID routing to separate SQLite caches or explicitly selected ADX databases, with no model-accessible database tools. |
 | **Portable knowledge** | Versioned JSON snapshots move the same policies, documents, proposals, and history between SQLite and Azure Data Explorer. |
-| **Shared public knowledge** | One durable, folder-backed source is locally materialized and can use the default ADX database without weakening client isolation. |
+| **Shared public knowledge** | One durable, folder-backed source stays local by default and can optionally use a selected public ADX database without weakening client isolation. |
 | **Guardrails** | Global and per-client disclosure, sensitivity, and escalation rules take precedence over reference material. |
 | **Local reasoning** | Local Qwen or authenticated GitHub Copilot CLI reasoning. |
 
 ## Get Started
 
 1. Launch `atsla` and join the call.
-2. Choose Local SQLite or Azure Data Explorer in **Settings > Workspace**, then configure a durable shared public knowledge folder from [template-public-knowledgebase](template-public-knowledgebase). In ADX mode, the default database is reserved for that public scope.
+2. Choose Local SQLite or Azure Data Explorer in **Settings > Workspace**, then configure a durable shared public knowledge folder from [template-public-knowledgebase](template-public-knowledgebase). Leave the optional public database blank to keep that scope local.
 3. Use the main **Client** window to stay in **Public knowledge only**, select an automatically discovered ADX database, or select/create a local SQLite client.
 4. In SQLite mode, optionally add a folder based on [template-client-folder](template-client-folder) for additive session context and meeting artifacts, then select **Load context**.
 5. Start a session. ATSLA sends the Standard Greeting once.

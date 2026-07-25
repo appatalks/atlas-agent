@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ClientWorkspace, SettingsStore, defaultSettings } from "../src/settings.js";
+import { ClientWorkspace, SettingsStore, defaultSettings, publicKnowledgeBackendConfig } from "../src/settings.js";
 
 describe("client workspace", () => {
   const folders: string[] = [];
@@ -245,6 +245,14 @@ describe("default voice profile", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("keeps public knowledge local until an operator selects an ADX database", () => {
+    const settings = { ...defaultSettings(), knowledgeBackend: "adx" as const, adxClusterUrl: "https://example.southcentralus.kusto.windows.net" };
+    expect(publicKnowledgeBackendConfig(settings)).toMatchObject({ backend: "sqlite", adxDefaultDatabase: "", adxPublicDatabase: "" });
+
+    settings.adxDefaultDatabase = "public-knowledge";
+    expect(publicKnowledgeBackendConfig(settings)).toMatchObject({ backend: "adx", adxDefaultDatabase: "public-knowledge" });
   });
 
   it("normalizes an ADX portal link supplied through environment defaults", () => {

@@ -849,7 +849,10 @@ export function knowledgeBackendConfig(settings: VoiceBridgeSettings): Knowledge
 }
 
 export function publicKnowledgeBackendConfig(settings?: VoiceBridgeSettings): KnowledgeBackendConfig {
-  return settings ? knowledgeBackendConfig(settings) : localKnowledgeBackendConfig();
+  if (!settings || settings.knowledgeBackend !== "adx" || !(settings.adxPublicDatabase || settings.adxDefaultDatabase)) {
+    return localKnowledgeBackendConfig();
+  }
+  return knowledgeBackendConfig(settings);
 }
 
 function localKnowledgeBackendConfig(): KnowledgeBackendConfig {

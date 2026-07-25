@@ -104,6 +104,7 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain('id="refreshClientDatabases"');
     expect(dashboard.body).toContain("loadAdxClientDatabases");
     expect(dashboard.body).toContain("Default public knowledge database");
+    expect(dashboard.body).toContain("Optional; public knowledge stays local when blank");
     expect(dashboard.body).toContain("publicOnly:true");
     expect(dashboard.body).toContain('id="exportClientKnowledge"');
     expect(dashboard.body).toContain('id="knowledgeImportFile"');
