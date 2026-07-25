@@ -71,7 +71,8 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain("data-settings-tab=\"voice\"");
     expect(dashboard.body).toContain('id="ttsEngineUrl"');
     expect(dashboard.body).toContain('id="copilotReasoningEffort"');
-    expect(dashboard.body).toContain("Higher levels can increase latency and premium usage");
+    expect(dashboard.body).toContain('class="reasoning-controls"');
+    expect(dashboard.body).toContain("Higher reasoning levels can increase latency and premium usage");
     expect(dashboard.body).toContain("data-settings-tab=\"appearance\"");
     expect(dashboard.body).toContain("appearanceTheme");
     expect(dashboard.body).toContain("ATSLA signal");
