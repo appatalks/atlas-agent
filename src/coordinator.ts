@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
 import { NO_RESPONSE_SENTINEL, responseTemplates, type AgentActivity, type ChatProvider, type Draft, type EscalationRequest, type LocalModelId, type MeetingSession, type MeetingSessionSummary, type ModelReply, type ResponseMode, type SessionTelemetry, type TranscriptEvent } from "./domain.js";
 import { DraftStore, ResponsePolicy } from "./policy.js";
-import { type VoiceBridgeSettings, type ClientConfiguration, ClientWorkspace, SettingsStore, defaultSettings, knowledgeBackendConfig, publicKnowledgeBackendConfig } from "./settings.js";
+import { type VoiceBridgeSettings, type ClientConfiguration, type CopilotReasoningEffort, ClientWorkspace, SettingsStore, defaultSettings, knowledgeBackendConfig, publicKnowledgeBackendConfig } from "./settings.js";
 import { type SpeechDispatch, type SpeechOutput } from "./voice.js";
 import { SessionStore } from "./session-store.js";
 import { type CreateKnowledgeProposal, type KnowledgeProposal, type KnowledgeScope, type KnowledgeSnapshot } from "./knowledge-store.js";
@@ -172,9 +172,11 @@ export class MeetingCoordinator {
       setProvider?: (provider: "local-qwen" | "copilot-acp") => void;
       setModelKey?: (modelKey: LocalModelId) => void;
       setCopilotModel?: (model: string) => void;
+      setCopilotReasoningEffort?: (reasoningEffort: CopilotReasoningEffort) => void;
     };
     provider.setProvider?.(this.settings.modelProvider);
     provider.setCopilotModel?.(this.settings.copilotModel);
+    provider.setCopilotReasoningEffort?.(this.settings.copilotReasoningEffort);
     if (provider.setModelKey && this.settings.inputModel in { "qwen3-8b": true, "qwen2.5-7b": true, "qwen2.5-1.5b": true, "qwen3-0.6b": true }) {
       provider.setModelKey(this.settings.inputModel as LocalModelId);
     }

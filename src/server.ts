@@ -11,7 +11,7 @@ import { runSimulation } from "./simulation.js";
 import { LocalVoiceBridgeOutput, SimulatedSpeechOutput } from "./voice.js";
 import { MacVoiceOutput, PipeWireVoiceOutput } from "./voice.js";
 import { AudioControl } from "./audio-control.js";
-import { ClientWorkspace, SettingsStore } from "./settings.js";
+import { ClientWorkspace, SettingsStore, copilotReasoningEfforts } from "./settings.js";
 import { SessionStore } from "./session-store.js";
 import { type KnowledgeProposal, type KnowledgeProposalOperation, type KnowledgeScope, type KnowledgeSnapshot } from "./knowledge-store.js";
 
@@ -43,7 +43,7 @@ export function buildServer() {
   const provider = providerKind === "local-qwen" || providerKind === "copilot-acp"
     ? new ProviderRouter(
       new LocalQwenProvider(localQwenUrl, modelId),
-      new CopilotAcpProvider(copilotAcpUrl, savedSettings.copilotModel),
+      new CopilotAcpProvider(copilotAcpUrl, savedSettings.copilotModel, fetch, savedSettings.copilotReasoningEffort),
       savedSettings.modelProvider,
     )
     : providerKind === "openai-compatible"
@@ -96,7 +96,7 @@ export function buildServer() {
     return {
       providers: [
         { id: "local-qwen", label: "Local Qwen", ready: await isReachable(localQwenUrl), models: Object.entries(modelProfiles).map(([id, profile]) => ({ id, label: profile.label })) },
-        { id: "copilot-acp", label: "GitHub Copilot CLI", ready: await isReachable(copilotAcpUrl), models: copilotModels.map((id) => ({ id, label: id === "auto" ? "Copilot automatic" : id })) },
+        { id: "copilot-acp", label: "GitHub Copilot CLI", ready: await isReachable(copilotAcpUrl), models: copilotModels.map((id) => ({ id, label: id === "auto" ? "Copilot automatic" : id })), reasoningEfforts: copilotReasoningEfforts.map((id) => ({ id, label: id === "default" ? "Model default" : id })) },
       ],
     };
   });

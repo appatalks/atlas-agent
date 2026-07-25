@@ -218,14 +218,21 @@ describe("network provider contracts", () => {
       receivedPayload = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ choices: [{ message: { content: "Copilot reply" } }] }), { status: 200 });
     };
-    const provider = new CopilotAcpProvider(new URL("http://127.0.0.1:8888/"), "claude-sonnet-4.6", fakeFetch);
+    const provider = new CopilotAcpProvider(new URL("http://127.0.0.1:8888/"), "claude-sonnet-4.6", fakeFetch, "high");
     const reply = await provider.complete({ transcript: [], question: "Provide a concise answer." });
 
     expect(receivedUrl).toBe("http://127.0.0.1:8888/v1/chat/completions");
     expect(receivedPayload.acp_model).toBe("claude-sonnet-4.6");
+    expect(receivedPayload.acp_reasoning_effort).toBe("high");
     expect((receivedPayload.messages as Array<{ role: string; content: string }>)[0].content).toContain("You are AppaTalks");
     expect((receivedPayload.messages as Array<{ role: string; content: string }>)[0].content).toContain("ATSLA means AppaTalks Support Live Agent");
     expect(reply.text).toBe("Copilot reply");
+  });
+
+  it("passes supported reasoning effort to the Copilot CLI", () => {
+    const bridge = readFileSync(new URL("../tools/stateless_acp_bridge.py", import.meta.url), "utf8");
+    expect(bridge).toContain('command.extend(["--reasoning-effort", self.reasoning_effort])');
+    expect(bridge).toContain('"none", "minimal", "low", "medium", "high", "xhigh", "max"');
   });
 
   it("uses the local Qwen bridge model key rather than a cloud model identifier", async () => {

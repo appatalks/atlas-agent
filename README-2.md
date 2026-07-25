@@ -191,6 +191,8 @@ Local Qwen receives only the current request transcript and application-retrieve
 
 This keeps ATSLA as the authority for client context and prevents Copilot conversation history from crossing clients.
 
+Under **Settings > Agent**, Copilot models expose the CLI's reasoning levels: model default, none, minimal, low, medium, high, xhigh, and max. The selected level is persisted and passed to each isolated Copilot process with `--reasoning-effort`. Local Qwen does not use this control. Higher levels can increase response latency and premium-request usage.
+
 ## Eva-Agent Technology
 
 ATSLA's database memory, SQLite/ADX portability, scoped recall, secure Kusto authentication, and reviewed knowledge-update workflow build on technology and implementation patterns developed in [Eva-Agent](https://github.com/appatalks/eva-agent/). ATSLA remains independently deployable: no Eva-Agent checkout, process, or shared bridge is required at runtime.

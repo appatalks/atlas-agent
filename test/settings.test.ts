@@ -109,6 +109,20 @@ describe("default voice profile", () => {
     expect(defaults.ttsEngineUrl).toBe("http://127.0.0.1:8090/");
     expect(defaults.responseMode).toBe("autonomous");
     expect(defaults.defaultInputMode).toBe("agent");
+    expect(defaults.copilotReasoningEffort).toBe("default");
+  });
+
+  it("persists the selected Copilot reasoning effort", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-reasoning-settings-"));
+    try {
+      const path = join(root, "settings.json");
+      const store = new SettingsStore(path);
+      store.update({ copilotReasoningEffort: "xhigh" });
+
+      expect(new SettingsStore(path).get()).toMatchObject({ settingsVersion: 12, copilotReasoningEffort: "xhigh" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("persists edited AppaTalks custom instructions", () => {
@@ -161,7 +175,7 @@ describe("default voice profile", () => {
       writeFileSync(path, JSON.stringify(legacy), "utf8");
       const migrated = new SettingsStore(path).get();
 
-      expect(migrated.settingsVersion).toBe(11);
+      expect(migrated.settingsVersion).toBe(12);
       expect(migrated.responseMode).toBe("autonomous");
       expect(migrated.defaultInputMode).toBe("agent");
     } finally {
@@ -235,7 +249,7 @@ describe("default voice profile", () => {
         adxAuthMode: "device-code",
       });
       expect(updated).toMatchObject({
-        settingsVersion: 11,
+        settingsVersion: 12,
         knowledgeBackend: "adx",
         adxClusterUrl: "https://example.southcentralus.kusto.windows.net",
         adxDefaultDatabase: "client-database",
@@ -286,7 +300,7 @@ describe("default voice profile", () => {
       writeFileSync(path, JSON.stringify(legacy), "utf8");
 
       const migrated = new SettingsStore(path).get();
-      expect(migrated).toMatchObject({ settingsVersion: 11, appearanceTheme: "atsla" });
+      expect(migrated).toMatchObject({ settingsVersion: 12, appearanceTheme: "atsla" });
       expect(migrated.voiceProfiles.find((profile) => profile.id === "eva")?.instructions).toContain("warm, curious, and genuine");
     } finally {
       rmSync(root, { recursive: true, force: true });

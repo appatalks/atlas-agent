@@ -70,6 +70,8 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain("data-settings-tab=\"agent\"");
     expect(dashboard.body).toContain("data-settings-tab=\"voice\"");
     expect(dashboard.body).toContain('id="ttsEngineUrl"');
+    expect(dashboard.body).toContain('id="copilotReasoningEffort"');
+    expect(dashboard.body).toContain("Higher levels can increase latency and premium usage");
     expect(dashboard.body).toContain("data-settings-tab=\"appearance\"");
     expect(dashboard.body).toContain("appearanceTheme");
     expect(dashboard.body).toContain("ATSLA signal");
@@ -145,6 +147,7 @@ describe("HTTP control plane", () => {
     const options = (await server.inject({ method: "GET", url: "/v1/provider-options" })).json();
     const copilot = options.providers.find((provider: { id: string }) => provider.id === "copilot-acp");
     expect(copilot.models.map((model: { id: string }) => model.id)).toEqual(expect.arrayContaining(["gpt-5.6-terra", "gpt-5.6-luna"]));
+    expect(copilot.reasoningEfforts.map((effort: { id: string }) => effort.id)).toEqual(["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
   });
 
   it("renames a persisted session and rejects blank titles", async () => {

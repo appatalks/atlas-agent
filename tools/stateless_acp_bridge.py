@@ -15,13 +15,15 @@ from typing import Any
 
 MAX_MESSAGES = 20
 MAX_MESSAGE_CHARS = 60_000
+REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 
 class AcpSession:
-    def __init__(self, copilot_path: str, cwd: Path, model: str) -> None:
+    def __init__(self, copilot_path: str, cwd: Path, model: str, reasoning_effort: str) -> None:
         self.copilot_path = copilot_path
         self.cwd = cwd
         self.model = model
+        self.reasoning_effort = reasoning_effort
         self.process: subprocess.Popen[bytes] | None = None
         self.next_id = 0
         self.chunks: list[str] = []
@@ -30,6 +32,8 @@ class AcpSession:
         command = [self.copilot_path, "--acp", "--stdio"]
         if self.model and self.model != "auto":
             command.extend(["--model", self.model])
+        if self.reasoning_effort:
+            command.extend(["--reasoning-effort", self.reasoning_effort])
         self.process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
@@ -134,7 +138,10 @@ class BridgeService:
                 raise ValueError(f"message content must contain 1 to {MAX_MESSAGE_CHARS} characters")
             rendered.append(f"{message['role'].capitalize()}:\n{message['content']}")
         model = payload.get("acp_model") if isinstance(payload.get("acp_model"), str) else "auto"
-        session = AcpSession(self.copilot_path, self.cwd, model)
+        reasoning_effort = payload.get("acp_reasoning_effort") if isinstance(payload.get("acp_reasoning_effort"), str) else ""
+        if reasoning_effort and reasoning_effort not in REASONING_EFFORTS:
+            raise ValueError("acp_reasoning_effort is unsupported")
+        session = AcpSession(self.copilot_path, self.cwd, model, reasoning_effort)
         try:
             with self.lock:
                 text = session.complete("\n\n".join(rendered))

@@ -1,4 +1,5 @@
 import { NO_RESPONSE_SENTINEL, type ChatProvider, type ChatRequest, type LocalModelId, type ModelReply, type ModelUsage, type ProviderId, modelProfiles } from "./domain.js";
+import { type CopilotReasoningEffort } from "./settings.js";
 
 interface CompletionPayload {
   model?: string;
@@ -134,10 +135,15 @@ export class CopilotAcpProvider implements ChatProvider {
     private readonly endpoint: URL,
     private model: string,
     private readonly fetchImplementation: typeof fetch = fetch,
+    private reasoningEffort: CopilotReasoningEffort = "default",
   ) {}
 
   setModel(model: string): void {
     this.model = model === "auto" ? "" : model;
+  }
+
+  setReasoningEffort(reasoningEffort: CopilotReasoningEffort): void {
+    this.reasoningEffort = reasoningEffort;
   }
 
   async complete(request: ChatRequest): Promise<ModelReply> {
@@ -148,6 +154,7 @@ export class CopilotAcpProvider implements ChatProvider {
       body: JSON.stringify({
         model: "copilot-acp",
         acp_model: this.model && this.model !== "auto" ? this.model : undefined,
+        acp_reasoning_effort: this.reasoningEffort === "default" ? undefined : this.reasoningEffort,
         messages: [
           { role: "system", content: meetingInstructions },
           ...request.transcript.slice(-12).map((event) => ({ role: "user", content: `${event.speaker}: ${event.text}` })),
@@ -195,6 +202,10 @@ export class ProviderRouter implements ChatProvider {
 
   setCopilotModel(model: string): void {
     this.copilot.setModel(model);
+  }
+
+  setCopilotReasoningEffort(reasoningEffort: CopilotReasoningEffort): void {
+    this.copilot.setReasoningEffort(reasoningEffort);
   }
 
   complete(request: ChatRequest): Promise<ModelReply> {

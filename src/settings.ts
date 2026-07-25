@@ -38,6 +38,7 @@ export interface VoiceBridgeSettings {
   modelProvider: "local-qwen" | "copilot-acp";
   inputModel: string;
   copilotModel: string;
+  copilotReasoningEffort: CopilotReasoningEffort;
   ttsEngineUrl: string;
   voiceProfile: string;
   voiceProfiles: VoiceProfile[];
@@ -68,6 +69,8 @@ export interface ClientConfiguration {
 }
 
 export type AppearanceTheme = "atsla" | "atelier" | "lcars" | "terminal" | "dark";
+export const copilotReasoningEfforts = ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type CopilotReasoningEffort = typeof copilotReasoningEfforts[number];
 
 interface ClientProfileRecord extends Record<string, unknown> {
   id: string;
@@ -113,7 +116,7 @@ export function defaultSettings(): VoiceBridgeSettings {
     false,
   );
   return {
-    settingsVersion: 11,
+    settingsVersion: 12,
     appearanceTheme: "atsla",
     glassTransparency: 88,
     responseMode: "autonomous",
@@ -121,6 +124,7 @@ export function defaultSettings(): VoiceBridgeSettings {
     modelProvider: "local-qwen",
     inputModel: "qwen3-8b",
     copilotModel: "auto",
+    copilotReasoningEffort: "default",
     ttsEngineUrl: process.env.LOCAL_VOICE_BRIDGE_URL ?? process.env.VOICE_BRIDGE_REMOTE_TTS_URL ?? "http://127.0.0.1:8090/",
     voiceProfile: "AppaTalks",
     voiceProfiles: defaultVoiceProfiles.map((profile) => ({ ...profile })),
@@ -162,6 +166,7 @@ export class SettingsStore {
     const appearanceTheme = isAppearanceTheme(partial.appearanceTheme) ? partial.appearanceTheme : this.value.appearanceTheme;
     const defaultInputMode = partial.defaultInputMode === "operator" ? "operator" : partial.defaultInputMode === "agent" ? "agent" : this.value.defaultInputMode;
     const inputModel = typeof partial.inputModel === "string" ? partial.inputModel : this.value.inputModel;
+    const copilotReasoningEffort = isCopilotReasoningEffort(partial.copilotReasoningEffort) ? partial.copilotReasoningEffort : this.value.copilotReasoningEffort;
     const ttsEngineUrl = typeof partial.ttsEngineUrl === "string" ? normalizeTtsEngineUrl(partial.ttsEngineUrl, this.value.ttsEngineUrl) : this.value.ttsEngineUrl;
     const modelProvider = partial.modelProvider === "copilot-acp" ? "copilot-acp" : partial.modelProvider === "local-qwen" ? "local-qwen" : this.value.modelProvider;
     const knowledgeBackend = partial.knowledgeBackend === "adx" ? "adx" : partial.knowledgeBackend === "sqlite" ? "sqlite" : this.value.knowledgeBackend;
@@ -191,6 +196,7 @@ export class SettingsStore {
       adxDefaultDatabase: normalizedAdx.defaultDatabase,
       adxPublicDatabase: typeof partial.adxPublicDatabase === "string" ? partial.adxPublicDatabase.trim().slice(0, 128) : this.value.adxPublicDatabase,
       inputModel,
+      copilotReasoningEffort,
       ttsEngineUrl,
       activeProfileId,
       activeClientId,
@@ -210,11 +216,11 @@ export class SettingsStore {
       const stored = JSON.parse(readFileSync(this.settingsPath, "utf8")) as Partial<VoiceBridgeSettings>;
       const preV5 = !stored.settingsVersion || stored.settingsVersion < 5;
       const requiresAppaTalksMigration = isLegacyDefaultVoiceSelection(stored.voiceProfile) || stored.voiceProfiles?.some(isLegacyDefaultVoiceProfile);
-      const requiresMigration = stored.settingsVersion !== 11 || requiresAppaTalksMigration;
+      const requiresMigration = stored.settingsVersion !== 12 || requiresAppaTalksMigration;
       const migrated = requiresMigration
         ? {
           ...stored,
-          settingsVersion: 11,
+          settingsVersion: 12,
           ...(stored.appearanceTheme === "atelier" ? { appearanceTheme: "atsla" as const } : {}),
           ...(preV5 ? { responseMode: "autonomous" as const, defaultInputMode: "agent" as const } : {}),
         }
@@ -235,6 +241,7 @@ export class SettingsStore {
         ...migrated,
         ttsEngineUrl: normalizeTtsEngineUrl(migrated.ttsEngineUrl, defaults.ttsEngineUrl),
         voiceProfile: isLegacyDefaultVoiceSelection(migrated.voiceProfile) ? "AppaTalks" : migrated.voiceProfile ?? "AppaTalks",
+        copilotReasoningEffort: isCopilotReasoningEffort(migrated.copilotReasoningEffort) ? migrated.copilotReasoningEffort : defaults.copilotReasoningEffort,
         knowledgeBackend: migrated.knowledgeBackend === "adx" ? "adx" : migrated.knowledgeBackend === "sqlite" ? "sqlite" : defaults.knowledgeBackend,
         adxClusterUrl: normalizedAdx.clusterUrl,
         adxAuthMode: isAdxAuthMode(migrated.adxAuthMode) ? migrated.adxAuthMode : defaults.adxAuthMode,
@@ -824,6 +831,10 @@ function isResponseMode(value: unknown): value is ResponseMode {
 
 function isAdxAuthMode(value: unknown): value is AdxAuthMode {
   return value === "device-code" || value === "interactive-browser" || value === "azure-cli" || value === "managed-identity" || value === "application";
+}
+
+function isCopilotReasoningEffort(value: unknown): value is CopilotReasoningEffort {
+  return typeof value === "string" && copilotReasoningEfforts.includes(value as CopilotReasoningEffort);
 }
 
 function normalizeAdxTarget(clusterValue: string, databaseValue: string, strict = true): { clusterUrl: string; defaultDatabase: string } {
