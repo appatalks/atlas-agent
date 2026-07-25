@@ -44,7 +44,7 @@ check_node_runtime() {
     echo "ATSLA requires Node.js 24 or newer for its built-in SQLite knowledge store. Found: $(node --version)" >&2
     exit 1
   fi
-  node -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(":memory:"); const enabled = db.prepare("SELECT sqlite_compileoption_used(\"ENABLE_FTS5\") AS enabled").get().enabled; db.close(); if (!enabled) process.exit(1)' || {
+  node -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(":memory:"); const enabled = db.prepare("SELECT sqlite_compileoption_used(?) AS enabled").get("ENABLE_FTS5").enabled; db.close(); if (!enabled) process.exit(1)' || {
     echo "This Node.js build does not provide the required node:sqlite FTS5 support." >&2
     exit 1
   }

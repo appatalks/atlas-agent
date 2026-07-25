@@ -18,6 +18,9 @@ describe("installation entry points", () => {
     expect(installer).toContain('npm install --include=dev');
     expect(installer).toContain("ATSLA requires Node.js 24 or newer");
     expect(installer).toContain('require("node:sqlite")');
+    expect(installer).toContain('sqlite_compileoption_used(?)');
+    expect(installer).toContain('.get("ENABLE_FTS5")');
+    expect(installer).not.toContain('sqlite_compileoption_used(\\"ENABLE_FTS5\\")');
     expect(installer).not.toContain("gh repo clone appatalks/voice_clone_module");
     expect(existsSync(`${root}/vendor/voice_clone_module/pyproject.toml`)).toBe(true);
     expect(existsSync(`${root}/assets/voices/appatalks-voice.wav`)).toBe(true);
