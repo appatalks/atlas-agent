@@ -4,7 +4,7 @@
 
 [Technical guide](README-2.md) | [Client template](template-client-folder) | [Public knowledge template](template-public-knowledgebase) | [Issues](https://github.com/appatalks/atsla-support-live-agent/issues)
 
-ATSLA is a local, operator-controlled AI support agent for live customer conversations. It listens to call audio, applies explicit global and client guardrails, and speaks through voice profiles when the operator authorizes or enables autonomous participation.
+ATSLA is a local, operator-controlled AI support agent for live customer conversations. It listens to call audio, retrieves knowledge for only the selected database client, applies explicit global and client guardrails, and speaks through voice profiles when the operator authorizes or enables autonomous participation.
 
 ## Public Quick Install
 
@@ -38,8 +38,9 @@ atsla
 | **Live call bridge** | PipeWire call capture, isolated agent microphone, and local operator monitoring. |
 | **AppaTalks voice** | Local voice synthesis with a prewarmed Standard Greeting. |
 | **Operator control** | Monitor, approve, autonomous, mute, takeover, and live-representative escalation controls. |
-| **Client isolation** | Stable client routing to separate SQLite caches or admin-mapped ADX databases, with no model-accessible database tools. |
+| **Client isolation** | Stable client-ID routing to separate SQLite caches or explicitly mapped ADX databases, with no model-accessible database tools. |
 | **Portable knowledge** | Versioned JSON snapshots move the same policies, documents, proposals, and history between SQLite and Azure Data Explorer. |
+| **Shared public knowledge** | One durable, folder-backed knowledge source is retrieved for every client without weakening client isolation. |
 | **Guardrails** | Global and per-client disclosure, sensitivity, and escalation rules take precedence over reference material. |
 | **Local reasoning** | Local Qwen or authenticated GitHub Copilot CLI reasoning. |
 
@@ -52,7 +53,7 @@ atsla
 5. Start a session. ATSLA sends the Standard Greeting once.
 6. Choose Monitor, Approve, or Autonomous mode. Use takeover whenever a person should resume the conversation.
 
-The committed templates are fictional import examples. Real client data and generated `.atsla/` databases belong outside this repository.
+The committed templates are fictional examples. Real client data, supplementary context folders, and generated `.atsla/` databases belong outside this repository.
 
 ## Privacy
 
@@ -67,3 +68,11 @@ ATSLA can generate inaccurate, incomplete, or inappropriate responses. A qualifi
 ATSLA is an independent, maintainer-led fun project. It is not an official product, service, or support channel of any company, platform, or model provider, and it comes without enterprise support or service-level commitments.
 
 For manual installation, architecture, audio routing, client context, themes, troubleshooting, APIs, and validation, see [README-2.md](README-2.md).
+
+---
+
+## Built With Eva-Agent
+
+ATSLA's database memory, backend portability, scoped recall, and reviewed knowledge-update patterns build on technology developed in [Eva-Agent](https://github.com/appatalks/eva-agent/).
+
+<a href="https://github.com/appatalks/eva-agent/"><img src="docs/Built_with_Eva-Agent.png" alt="Built with Eva-Agent" width="420"></a>

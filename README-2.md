@@ -6,7 +6,7 @@ This guide covers the local development and operations details for ATSLA | Suppo
 
 ![ATSLA live support flow](docs/atsla-flow.png)
 
-ATSLA supervises six local services:
+ATSLA coordinates the following local and optional remote services:
 
 | Service | Responsibility |
 | --- | --- |
@@ -16,6 +16,7 @@ ATSLA supervises six local services:
 | Transcription | FFmpeg segment capture plus local `whisper.cpp`. |
 | Reasoning | Local Qwen or authenticated GitHub Copilot CLI through ACP. |
 | Voice | Local AppaTalks/Chatterbox speech synthesis service. |
+| Knowledge | Client-ID-scoped SQLite caches, optional Azure Data Explorer snapshots, and a durable shared public folder. |
 
 Use the supervisor rather than starting those processes manually:
 
@@ -105,13 +106,13 @@ When an optional supplementary folder is configured, remote observations and gen
 
 Global documentation is separate from client data. Configure one durable shared public folder in **Settings** and keep its root distinct from every supplementary client folder.
 
-### Bulk Context And Guardrails
+### Supplementary Context And Guardrails
 
-New workspaces include `context-drop/`, an operator-friendly import area. ATSLA accepts reviewed `.md`, `.txt`, `.json`, `.csv`, `.yaml`, and `.yml` files, chunks them, indexes them with FTS5, and records stable source paths and content hashes. Unchanged files are not reindexed; removed import files are pruned without affecting future AI-approved database records.
+Supplementary client folders include `context-drop/`, an operator-friendly additive import area. ATSLA accepts reviewed `.md`, `.txt`, `.json`, `.csv`, `.yaml`, and `.yml` files, chunks them, indexes them with FTS5, and records stable source paths and content hashes. Unchanged files are not reindexed; removed imports are pruned without affecting future AI-approved database records.
 
 Use `context-drop/CONTEXT-GUARDRAILS.md` for client-specific policy. Write clear sections for **May Discuss**, **Sensitive Or Restricted**, and **Required Behavior**. Describe what to decline, what to escalate, and the safe alternative to provide. This file is loaded before the client reference material.
 
-For organization-wide policy, create `GLOBAL-GUARDRAILS.md` at the root of the shared public knowledge base. Use [template-public-knowledgebase](template-public-knowledgebase) or [docs/GLOBAL-GUARDRAILS.template.md](docs/GLOBAL-GUARDRAILS.template.md) as a starting point. Saving that path imports its public documents into a separate database. Global guardrails are included for every session and take precedence over client guardrails. Reference files cannot override either level.
+For organization-wide policy, create `GLOBAL-GUARDRAILS.md` at the root of the durable shared public knowledge folder. Use [template-public-knowledgebase](template-public-knowledgebase) or [docs/GLOBAL-GUARDRAILS.template.md](docs/GLOBAL-GUARDRAILS.template.md) as a starting point. **Load context** refreshes this folder's local public cache before loading the selected client. Global guardrails are included for every session and take precedence over client guardrails. Reference files cannot override either level.
 
 Best practices:
 
@@ -120,14 +121,14 @@ Best practices:
 - Prefer data extracts that omit credentials, unnecessary personal data, and raw production exports.
 - State an escalation path for authorization, pricing, legal, security, and account-specific requests.
 - Review `learnings/` before promoting observations into durable client reference material.
-- Start client workspaces from [template-client-folder](template-client-folder) and public documentation from [template-public-knowledgebase](template-public-knowledgebase).
-- Keep real client folders and generated `.atsla/` databases outside the git repository.
+- Start optional supplementary folders from [template-client-folder](template-client-folder) and public documentation from [template-public-knowledgebase](template-public-knowledgebase).
+- Keep real client folders, local caches, and generated `.atsla/` databases outside the git repository.
 
 ### Reviewed Knowledge Updates
 
 Imported files and operator policies are not writable by the conversation model. AI-generated meeting summaries create pending proposals under `ai/session-summaries/` in the active client's database. Proposed content is excluded from recall until an operator approves it in **Settings > Workspace**. Rejection leaves recall unchanged; approval publishes a new immutable document version; retirement proposals remove a document from recall without deleting its history.
 
-Proposal scope is resolved from operator state. Client proposal operations require explicitly loaded client context, and public proposals use only the configured public database. Switching clients changes the proposal namespace immediately. Guardrail policies cannot be changed through the proposal API.
+Proposal scope is resolved from operator state. Client proposal operations require explicitly loaded client context and synchronize to that client's configured backend. Public proposals remain in the durable shared folder's local knowledge store. Switching clients changes the proposal namespace immediately. Guardrail policies cannot be changed through the proposal API.
 
 ### Knowledge Backends And Routing
 
@@ -139,14 +140,14 @@ ADX accepts a direct cluster endpoint or an Azure Data Explorer portal link. Aut
 ATSLA_KNOWLEDGE_BACKEND=adx
 ATSLA_ADX_CLUSTER_URL=https://cluster.region.kusto.windows.net
 ATSLA_ADX_AUTH_MODE=device-code
-ATSLA_ADX_DEFAULT_DATABASE=atsla-client-database
-ATSLA_ADX_PUBLIC_DATABASE=atsla-public-database
 ```
+
+For production multi-client use, map every catalog client explicitly to its own ADX database. `ATSLA_ADX_DEFAULT_DATABASE` is an optional single-client fallback, not the recommended isolation boundary. Shared public knowledge stays folder-backed and does not require an ADX database.
 
 Database clients are stored in the administrator client catalog with a stable `id`. A supplementary `client-profile.json` mirrors that identity when a folder is attached. An optional `knowledgeDatabase` provides an explicit route. Resolution fails closed and uses this order:
 
 1. Explicit database in the selected client profile.
-2. Admin-configured default client or public database.
+2. Optional admin-configured default client database.
 3. One exact accessible database-name match against the stable ID or client name.
 4. Exactly one accessible database already containing that scope ID.
 
@@ -154,11 +155,29 @@ Missing and ambiguous routes are errors. Caller text and model output never part
 
 On first device-code use, open the displayed Microsoft device-login page and enter the code. The Kusto session is then stored under the dedicated `atsla-adx` identity cache. Set `ATSLA_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE=true` only on a trusted single-user machine when no OS credential store is available.
 
-A single configured ADX database may hold the public and client scopes for a single-client evaluation. For production multi-client isolation, use a separate ADX database and scoped RBAC identity per client, or set an explicit per-client database mapping. Do not use one unrestricted identity across unrelated customer databases.
+A single default ADX database may be used for a single-client evaluation. For production multi-client isolation, use a separate ADX database and scoped RBAC identity per client with an explicit catalog mapping. Do not use one unrestricted identity across unrelated customer databases.
 
 On **Load context**, ATSLA pulls the latest matching ADX snapshot when present, refreshes reviewed file imports locally, and appends the merged versioned snapshot back to the same resolved database. Approved proposals also synchronize after mutation. Explicit **Pull** and **Push** controls are available for recovery and administration.
 
-Portable JSON snapshots include documents, immutable versions, policies, and proposal state. Export/import works in either backend mode, but the snapshot scope ID must match the selected client or public scope; cross-client imports are rejected.
+Portable JSON snapshots include documents, immutable versions, policies, and proposal state. Client snapshots move between SQLite and ADX; public snapshots back up or restore the local shared store. The snapshot scope ID must match the selected client or public scope, so cross-client imports are rejected.
+
+### Azure Data Explorer Authentication
+
+For a personal Microsoft account without an Azure subscription, select **Device code (personal account)**. ATSLA uses the Kusto scope directly, matching Eva-Agent's approach and avoiding Azure Resource Manager subscription requirements.
+
+1. Configure the ADX cluster endpoint or paste its Data Explorer portal URL.
+2. Select `device-code` authentication and choose **Discover** or **Load context**.
+3. On the first use, open `https://login.microsoft.com/device` and enter the displayed code.
+4. Complete sign-in with an account authorized on the ADX databases.
+5. ATSLA stores the MSAL session in the OS credential store and uses silent refresh for later commands and restarts.
+
+```bash
+ATSLA_KNOWLEDGE_BACKEND=adx
+ATSLA_ADX_CLUSTER_URL=https://cluster.region.kusto.windows.net
+ATSLA_ADX_AUTH_MODE=device-code
+```
+
+`ATSLA_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE` defaults to false. Set it to true only on a trusted single-user machine when no OS credential store is available. Azure CLI authentication is also supported for work accounts with an active CLI account profile. Managed identity is recommended for unattended production deployments; application credentials must be supplied through environment variables or a secret manager and are never persisted in ATSLA settings.
 
 ## Provider Isolation
 
@@ -172,6 +191,12 @@ Local Qwen receives only the current request transcript and application-retrieve
 - Neither provider can issue database queries or select another client's store.
 
 This keeps ATSLA as the authority for client context and prevents Copilot conversation history from crossing clients.
+
+## Eva-Agent Technology
+
+ATSLA's database memory, SQLite/ADX portability, scoped recall, secure Kusto authentication, and reviewed knowledge-update workflow build on technology and implementation patterns developed in [Eva-Agent](https://github.com/appatalks/eva-agent/). ATSLA remains independently deployable: no Eva-Agent checkout, process, or shared bridge is required at runtime.
+
+The linked attribution badge in [README.md](README.md) is stored locally at `docs/Built_with_Eva-Agent.png` and links back to the Eva-Agent repository.
 
 ## Response Modes
 
@@ -241,19 +266,19 @@ Use **Glass transparency** to balance the layered background against dense text.
 | `GET /health` | Service readiness and active provider/voice details. |
 | `GET /v1/settings` | Read persisted operator settings. |
 | `PUT /v1/settings` | Update operator settings. |
-| `POST /v1/client-workspace` | Select or create a client workspace. |
-| `POST /v1/context/load` | Import and activate the selected client's isolated SQLite context. |
+| `POST /v1/client-workspace` | Select or create a database client; optionally attach a supplementary folder. |
+| `POST /v1/context/load` | Pull the selected client backend, merge supplementary files, and refresh shared public context. |
 | `POST /v1/context/clear` | Clear active client context. |
 | `GET /v1/knowledge/backend` | Read non-secret backend and ADX routing configuration. |
 | `GET /v1/knowledge/adx/databases` | Discover databases accessible to the configured admin identity. |
-| `GET/PUT /v1/client-workspace/knowledge-route` | Read or set the selected client's stable ADX database mapping. |
+| `GET/PUT /v1/client-workspace/knowledge-route` | Read or set the selected client's ADX mapping and supplementary folder. |
 | `GET /v1/knowledge/:scope/proposals` | List pending or reviewed proposals for `client` or `public`. |
 | `POST /v1/knowledge/:scope/proposals` | Create a scoped knowledge upsert or retirement proposal. |
 | `POST /v1/knowledge/:scope/proposals/:id/:decision` | Approve or reject a scoped proposal. |
 | `GET /v1/knowledge/:scope/export` | Export a portable scoped knowledge snapshot. |
 | `POST /v1/knowledge/:scope/import` | Import a same-scope portable snapshot and synchronize the active backend. |
-| `POST /v1/knowledge/:scope/sync` | Explicitly pull from or push to the configured backend. |
-| `GET /v1/sessions` | List sessions for the selected client workspace only. |
+| `POST /v1/knowledge/:scope/sync` | Explicitly pull or push client knowledge; public scope remains local. |
+| `GET /v1/sessions` | List sessions for the selected stable client ID only. |
 | `POST /v1/sessions` | Start a selected-client session and send the Standard Greeting. |
 | `POST /v1/transcripts` | Submit a transcript event. |
 | `POST /v1/drafts` | Generate a draft response. |
