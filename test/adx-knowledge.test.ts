@@ -136,7 +136,7 @@ describe("ADX knowledge repository", () => {
         adxPublicDatabase: "",
       }, () => repository);
 
-      const synced = await backend.synchronize(local, { scope: "client", scopeId: "northwind-client" }, () => local.sync([
+      const synced = await backend.synchronize(local, { scope: "client", scopeId: "northwind-client", explicitDatabase: "client-database" }, () => local.sync([
         { sourcePath: "knowledge/local.md", title: "Local", content: "LOCAL_IMPORT_CANARY" },
       ], []));
       expect(synced).toMatchObject({ backend: "adx", database: "client-database", pulled: true, pushed: true });
@@ -147,6 +147,29 @@ describe("ADX knowledge repository", () => {
     } finally {
       local.close();
       remoteSource.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reserves the configured default database for public knowledge", async () => {
+    const root = mkdtempSync(join(tmpdir(), "atsla-adx-public-default-"));
+    const local = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
+    const publicStore = new SqliteKnowledgeStore("public", join(root, "public.sqlite"));
+    const fakeClient = new FakeAdxClient(["public-default"]);
+    const repository = new AdxKnowledgeRepository({ clusterUrl: "https://example.southcentralus.kusto.windows.net", authMode: "azure-cli" }, fakeClient);
+    const backend = new KnowledgeBackendCoordinator({
+      backend: "adx",
+      adxClusterUrl: repository.clusterUrl,
+      adxAuthMode: "azure-cli",
+      adxDefaultDatabase: "public-default",
+      adxPublicDatabase: "",
+    }, () => repository);
+    try {
+      await expect(backend.push(local, { scope: "client", scopeId: "unknown-client" })).rejects.toThrow("No ADX database could be safely matched");
+      await expect(backend.push(publicStore, { scope: "public", scopeId: "public-knowledge" })).resolves.toMatchObject({ database: "public-default", routeSource: "default" });
+    } finally {
+      local.close();
+      publicStore.close();
       rmSync(root, { recursive: true, force: true });
     }
   });

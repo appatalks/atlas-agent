@@ -105,4 +105,30 @@ describe("persistent meeting sessions", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("keeps public-only sessions separate from every client", async () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-public-sessions-"));
+    try {
+      const coordinator = new MeetingCoordinator(
+        new SimulationProvider(),
+        new ResponsePolicy("autonomous"),
+        new DraftStore(),
+        new SimulatedSpeechOutput(),
+        undefined,
+        new ClientWorkspace(join(root, "clients"), undefined, join(root, "cache")),
+        new SessionStore(join(root, "sessions")),
+      );
+      const publicSession = await coordinator.createSession({ title: "Unknown caller" });
+      expect(publicSession).toMatchObject({ clientId: "public-knowledge-only", clientWorkspace: "" });
+
+      coordinator.selectClientWorkspace({ name: "Known Client" });
+      expect(coordinator.listSessions()).toEqual([]);
+      expect(() => coordinator.selectSession(publicSession.id)).toThrow("different client scope");
+
+      coordinator.selectClientWorkspace({ publicOnly: true });
+      expect(coordinator.listSessions()).toMatchObject([{ id: publicSession.id, clientId: "public-knowledge-only" }]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

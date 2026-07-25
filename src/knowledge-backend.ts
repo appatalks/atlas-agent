@@ -117,7 +117,7 @@ export class KnowledgeBackendCoordinator {
       scope: route.scope,
       scopeId: route.scopeId,
       explicitDatabase: route.explicitDatabase,
-      defaultDatabase: route.scope === "public" ? this.config.adxPublicDatabase || this.config.adxDefaultDatabase : this.config.adxDefaultDatabase,
+      defaultDatabase: route.scope === "public" ? this.config.adxPublicDatabase || this.config.adxDefaultDatabase : undefined,
       aliases: route.aliases,
     });
   }

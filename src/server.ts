@@ -102,7 +102,7 @@ export function buildServer() {
   });
   app.get("/v1/settings", async () => coordinator.getSettings());
   app.put<{ Body: Record<string, unknown> }>("/v1/settings", async (request) => coordinator.updateSettings(request.body));
-  app.post<{ Body: { clientId?: string; path?: string; name?: string; database?: string; supplementaryContextPath?: string } }>("/v1/client-workspace", async (request, reply) => {
+  app.post<{ Body: { clientId?: string; path?: string; name?: string; database?: string; supplementaryContextPath?: string; publicOnly?: boolean } }>("/v1/client-workspace", async (request, reply) => {
     try { return coordinator.selectClientWorkspace(request.body); }
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Client selection failed." }); }
   });

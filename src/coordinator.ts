@@ -8,6 +8,8 @@ import { SessionStore } from "./session-store.js";
 import { type CreateKnowledgeProposal, type KnowledgeProposal, type KnowledgeScope, type KnowledgeSnapshot } from "./knowledge-store.js";
 import { type KnowledgeSyncResult } from "./knowledge-backend.js";
 
+const PUBLIC_SESSION_CLIENT_ID = "public-knowledge-only";
+
 export class MeetingCoordinator {
   private readonly transcript: TranscriptEvent[] = [];
   private readonly activity: AgentActivity[] = [];
@@ -186,11 +188,12 @@ export class MeetingCoordinator {
     return this.getSettings();
   }
 
-  selectClientWorkspace(request: { clientId?: string; path?: string; name?: string; database?: string; supplementaryContextPath?: string }): VoiceBridgeSettings {
+  selectClientWorkspace(request: { clientId?: string; path?: string; name?: string; database?: string; supplementaryContextPath?: string; publicOnly?: boolean }): VoiceBridgeSettings {
     this.persistSession();
     this.resetConversation();
     this.activeSession = undefined;
     this.loadedClientId = "";
+    if (request.publicOnly) return this.updateSettings({ activeClientId: "", clientWorkspace: "" });
     const clients = structuredClone(this.settings.clients);
     let client = request.clientId ? clients.find((item) => item.id === request.clientId) : undefined;
     if (!client && request.path?.trim()) {
@@ -223,20 +226,26 @@ export class MeetingCoordinator {
     });
   }
 
-  async loadClientContext(): Promise<{ loaded: boolean; path: string; files: number; characters: number; documents: number; chunks: number; databasePath: string; backend: "sqlite" | "adx"; database: string; routeSource: string; pulled: boolean; pushed: boolean }> {
-    const client = this.requireActiveClient();
-    const selected = client.supplementaryContextPath ? this.workspace.select({ path: client.supplementaryContextPath }) : "";
+  async loadClientContext(): Promise<{ loaded: boolean; scope: "client" | "public"; path: string; files: number; characters: number; documents: number; chunks: number; databasePath: string; backend: "sqlite" | "adx"; database: string; routeSource: string; pulled: boolean; pushed: boolean }> {
+    const client = this.activeClient();
+    const selected = client?.supplementaryContextPath ? this.workspace.select({ path: client.supplementaryContextPath }) : "";
     if (selected && this.settings.globalKnowledgePath && pathsOverlap(selected, this.settings.globalKnowledgePath)) {
       throw new Error("The selected client workspace overlaps the global knowledge folder.");
     }
     const backend = knowledgeBackendConfig(this.settings);
+    let publicStats;
     if (this.settings.globalKnowledgeEnabled && this.settings.globalKnowledgePath) {
-      await this.workspace.loadGlobalKnowledge(this.settings.globalKnowledgePath, publicKnowledgeBackendConfig());
+      publicStats = await this.workspace.loadGlobalKnowledge(this.settings.globalKnowledgePath, publicKnowledgeBackendConfig(this.settings));
+    }
+    if (!client) {
+      if (!publicStats) throw new Error("Enable and configure shared public knowledge before loading public-only context.");
+      this.record("listening", `Loaded public-only context from ${publicStats.database} (${publicStats.files} indexed files).`);
+      return { loaded: true, scope: "public", path: this.settings.globalKnowledgePath, ...publicStats };
     }
     const stats = await this.workspace.loadClient(client, backend);
     this.loadedClientId = client.id;
     this.record("listening", `Loaded client context for ${client.name} from ${stats.database} (${stats.files} indexed files).`);
-    return { loaded: true, path: selected, ...stats };
+    return { loaded: true, scope: "client", path: selected, ...stats };
   }
 
   clearClientContext(): { loaded: boolean; path: string; files: number; characters: number } {
@@ -250,7 +259,7 @@ export class MeetingCoordinator {
     selectedClientWorkspace: string;
     selectedClientId: string;
     client: { loaded: boolean; path: string; files: number; characters: number };
-    global: { enabled: boolean; path: string; files: number; characters: number };
+    global: { enabled: boolean; loaded: boolean; path: string; files: number; characters: number };
   } {
     const clientStats = this.loadedClientId ? this.workspace.clientStats(this.loadedClientId) : { files: 0, characters: 0 };
     const globalStats = this.settings.globalKnowledgeEnabled ? this.workspace.globalStats(this.settings.globalKnowledgePath) : { files: 0, characters: 0 };
@@ -258,7 +267,7 @@ export class MeetingCoordinator {
       selectedClientWorkspace: this.settings.clientWorkspace,
       selectedClientId: this.settings.activeClientId,
       client: { loaded: Boolean(this.loadedClientId), path: this.activeClient()?.supplementaryContextPath ?? "", ...clientStats },
-      global: { enabled: this.settings.globalKnowledgeEnabled, path: this.settings.globalKnowledgePath, ...globalStats },
+      global: { enabled: this.settings.globalKnowledgeEnabled, loaded: this.workspace.globalLoaded(this.settings.globalKnowledgePath), path: this.settings.globalKnowledgePath, ...globalStats },
     };
   }
 
@@ -274,11 +283,14 @@ export class MeetingCoordinator {
 
   async createSession(request: { title?: string }): Promise<MeetingSession> {
     if (!this.sessionStore) throw new Error("Session persistence is unavailable.");
-    const client = this.requireActiveClient();
+    const client = this.activeClient();
+    if (!client && this.settings.globalKnowledgeEnabled && this.settings.globalKnowledgePath) {
+      await this.workspace.loadGlobalKnowledge(this.settings.globalKnowledgePath, publicKnowledgeBackendConfig(this.settings));
+    }
     this.persistSession();
     this.resetConversation();
-    const clientWorkspace = client.supplementaryContextPath;
-    this.activeSession = this.sessionStore.create(request.title, client.id, clientWorkspace);
+    const clientWorkspace = client?.supplementaryContextPath ?? "";
+    this.activeSession = this.sessionStore.create(request.title, this.sessionClientId(), clientWorkspace);
     this.record("listening", `Session started: ${this.activeSession.title}`);
     this.persistSession();
     const greeting = responseTemplates.find((template) => template.id === "standard-greeting")!;
@@ -295,12 +307,11 @@ export class MeetingCoordinator {
 
   selectSession(sessionId: string): MeetingSession {
     if (!this.sessionStore) throw new Error("Session persistence is unavailable.");
-    const client = this.requireActiveClient();
     this.persistSession();
     this.resetConversation();
     this.loadedClientId = "";
     const session = this.sessionStore.get(sessionId);
-    if (session.clientId !== client.id) throw new Error("This session belongs to a different client.");
+    if (session.clientId !== this.sessionClientId()) throw new Error("This session belongs to a different client scope.");
     this.activeSession = structuredClone(session);
     this.transcript.push(...structuredClone(session.transcript));
     this.activity.push(...structuredClone(session.activity));
@@ -314,7 +325,7 @@ export class MeetingCoordinator {
   renameSession(sessionId: string, title: string): MeetingSession {
     if (!this.sessionStore) throw new Error("Session persistence is unavailable.");
     const existing = this.sessionStore.get(sessionId);
-    if (existing.clientId !== this.requireActiveClient().id) throw new Error("This session belongs to a different client.");
+    if (existing.clientId !== this.sessionClientId()) throw new Error("This session belongs to a different client scope.");
     const session = this.sessionStore.rename(sessionId, title);
     if (this.activeSession?.id === sessionId) this.activeSession = structuredClone(session);
     this.record("listening", `Session renamed: ${session.title}`);
@@ -323,7 +334,7 @@ export class MeetingCoordinator {
   }
 
   listSessions(): MeetingSessionSummary[] {
-    return this.sessionStore?.list(this.settings.activeClientId) ?? [];
+    return this.sessionStore?.list(this.sessionClientId()) ?? [];
   }
 
   activeSessionInfo(): { id: string; title: string } | null {
@@ -364,7 +375,7 @@ export class MeetingCoordinator {
       ...input,
       evidenceSessionId: input.evidenceSessionId || this.activeSession?.id,
     }, knowledgeBackendConfig(this.settings));
-    return this.workspace.createKnowledgeProposal(scope, this.knowledgeFolder(scope), input, publicKnowledgeBackendConfig());
+    return this.workspace.createKnowledgeProposal(scope, this.knowledgeFolder(scope), input, publicKnowledgeBackendConfig(this.settings));
   }
 
   listKnowledgeProposals(scope: KnowledgeScope, status: KnowledgeProposal["status"] | "all" = "pending"): KnowledgeProposal[] {
@@ -376,7 +387,7 @@ export class MeetingCoordinator {
   reviewKnowledgeProposal(scope: KnowledgeScope, proposalId: string, decision: "approve" | "reject"): Promise<KnowledgeProposal> {
     return scope === "client"
       ? this.workspace.reviewClientKnowledgeProposal(this.requireLoadedClient(), proposalId, decision, knowledgeBackendConfig(this.settings))
-      : this.workspace.reviewKnowledgeProposal(scope, this.knowledgeFolder(scope), proposalId, decision, publicKnowledgeBackendConfig());
+      : this.workspace.reviewKnowledgeProposal(scope, this.knowledgeFolder(scope), proposalId, decision, publicKnowledgeBackendConfig(this.settings));
   }
 
   exportKnowledge(scope: KnowledgeScope): KnowledgeSnapshot {
@@ -388,19 +399,19 @@ export class MeetingCoordinator {
   importKnowledge(scope: KnowledgeScope, snapshot: KnowledgeSnapshot): Promise<KnowledgeSyncResult> {
     return scope === "client"
       ? this.workspace.importClientKnowledgeSnapshot(this.requireLoadedClient(), snapshot, knowledgeBackendConfig(this.settings))
-      : this.workspace.importKnowledgeSnapshot(scope, this.knowledgeFolder(scope), snapshot, publicKnowledgeBackendConfig());
+      : this.workspace.importKnowledgeSnapshot(scope, this.knowledgeFolder(scope), snapshot, publicKnowledgeBackendConfig(this.settings));
   }
 
   pullKnowledge(scope: KnowledgeScope): Promise<KnowledgeSyncResult> {
     return scope === "client"
       ? this.workspace.pullClientKnowledge(this.requireLoadedClient(), knowledgeBackendConfig(this.settings))
-      : this.workspace.pullKnowledge(scope, this.knowledgeFolder(scope), publicKnowledgeBackendConfig());
+      : this.workspace.pullKnowledge(scope, this.knowledgeFolder(scope), publicKnowledgeBackendConfig(this.settings));
   }
 
   pushKnowledge(scope: KnowledgeScope): Promise<KnowledgeSyncResult> {
     return scope === "client"
       ? this.workspace.pushClientKnowledge(this.requireLoadedClient(), knowledgeBackendConfig(this.settings))
-      : this.workspace.pushKnowledge(scope, this.knowledgeFolder(scope), publicKnowledgeBackendConfig());
+      : this.workspace.pushKnowledge(scope, this.knowledgeFolder(scope), publicKnowledgeBackendConfig(this.settings));
   }
 
   listAdxDatabases(): Promise<string[]> {
@@ -583,7 +594,7 @@ export class MeetingCoordinator {
     if (!this.sessionStore || !this.activeSession) return;
     this.activeSession = this.sessionStore.save({
       ...this.activeSession,
-      clientId: this.settings.activeClientId,
+      clientId: this.sessionClientId(),
       clientWorkspace: this.activeClient()?.supplementaryContextPath ?? "",
       transcript: structuredClone(this.transcript),
       drafts: this.drafts.list(),
@@ -605,6 +616,10 @@ export class MeetingCoordinator {
 
   private activeClient(): ClientConfiguration | undefined {
     return this.settings.clients.find((client) => client.id === this.settings.activeClientId);
+  }
+
+  private sessionClientId(): string {
+    return this.activeClient()?.id ?? PUBLIC_SESSION_CLIENT_ID;
   }
 
   private requireActiveClient(): ClientConfiguration {

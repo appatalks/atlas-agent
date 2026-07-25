@@ -65,7 +65,7 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain("ATSLA | Support Live Agent");
     expect(dashboard.body).toContain("AppaTalks");
     expect(dashboard.body).toContain("Open folder");
-    expect(dashboard.body).toContain("context-drop");
+    expect(dashboard.body).toContain("Public knowledge only");
     expect(dashboard.body).toContain("data-settings-tab=\"workspace\"");
     expect(dashboard.body).toContain("data-settings-tab=\"agent\"");
     expect(dashboard.body).toContain("data-settings-tab=\"voice\"");
@@ -101,7 +101,10 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain('id="adxClusterUrl"');
     expect(dashboard.body).toContain("Device code (personal account)");
     expect(dashboard.body).toContain('id="discoverAdxDatabases"');
-    expect(dashboard.body).toContain('id="clientKnowledgeDatabase"');
+    expect(dashboard.body).toContain('id="refreshClientDatabases"');
+    expect(dashboard.body).toContain("loadAdxClientDatabases");
+    expect(dashboard.body).toContain("Default public knowledge database");
+    expect(dashboard.body).toContain("publicOnly:true");
     expect(dashboard.body).toContain('id="exportClientKnowledge"');
     expect(dashboard.body).toContain('id="knowledgeImportFile"');
     expect(dashboard.body).toContain("setInterval(refresh,3000)");
@@ -156,6 +159,29 @@ describe("HTTP control plane", () => {
 
     const blank = await server.inject({ method: "PATCH", url: `/v1/sessions/${created.id}`, payload: { title: "   " } });
     expect(blank.statusCode).toBe(400);
+  });
+
+  it("uses public knowledge only when no client is selected", async () => {
+    const server = buildServer();
+    servers.push(server);
+    await server.inject({ method: "POST", url: "/v1/client-workspace", payload: { name: "Known Client" } });
+
+    const selected = await server.inject({ method: "POST", url: "/v1/client-workspace", payload: { publicOnly: true } });
+    expect(selected.statusCode).toBe(200);
+    expect(selected.json()).toMatchObject({ activeClientId: "", clientWorkspace: "" });
+
+    const loaded = await server.inject({ method: "POST", url: "/v1/context/load" });
+    expect(loaded.statusCode).toBe(200);
+    expect(loaded.json()).toMatchObject({ loaded: true, scope: "public", backend: "sqlite" });
+    expect((await server.inject({ method: "GET", url: "/v1/context/status" })).json()).toMatchObject({
+      selectedClientId: "",
+      client: { loaded: false },
+      global: { enabled: true, loaded: true },
+    });
+
+    const session = await server.inject({ method: "POST", url: "/v1/sessions", payload: { title: "Unknown caller" } });
+    expect(session.statusCode).toBe(200);
+    expect(session.json().session).toMatchObject({ clientId: "public-knowledge-only", clientWorkspace: "" });
   });
 
   it("explicitly loads and clears only the selected client context", async () => {

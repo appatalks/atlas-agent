@@ -173,7 +173,9 @@ export class SettingsStore {
     const activeProfileId = profiles.some((profile) => profile.id === partial.activeProfileId) ? partial.activeProfileId! : this.value.activeProfileId;
     const clients = Array.isArray(partial.clients) ? partial.clients.map(normalizeClientConfiguration).filter(uniqueClient) : this.value.clients;
     const requestedActiveClientId = typeof partial.activeClientId === "string" ? partial.activeClientId : this.value.activeClientId;
-    const activeClientId = clients.some((client) => client.id === requestedActiveClientId) ? requestedActiveClientId : clients[0]?.id ?? "";
+    const activeClientId = requestedActiveClientId === ""
+      ? ""
+      : clients.some((client) => client.id === requestedActiveClientId) ? requestedActiveClientId : clients[0]?.id ?? "";
     const activeClient = clients.find((client) => client.id === activeClientId);
     this.value = {
       ...this.value,
@@ -243,9 +245,9 @@ export class SettingsStore {
         profiles: (migrated.profiles?.length ? migrated.profiles : defaultProfiles).map(normalizeProfile).map(migrateAppaTalksAgentProfile),
         voiceProfiles,
       };
-      if (!value.clients.some((client) => client.id === value.activeClientId)) value.activeClientId = value.clients[0]?.id ?? "";
+      if (value.activeClientId && !value.clients.some((client) => client.id === value.activeClientId)) value.activeClientId = value.clients[0]?.id ?? "";
       const activeClient = value.clients.find((client) => client.id === value.activeClientId);
-      if (activeClient) value.clientWorkspace = activeClient.supplementaryContextPath;
+      value.clientWorkspace = activeClient?.supplementaryContextPath ?? "";
       if (requiresMigration) {
         mkdirSync(resolve(this.settingsPath, ".."), { recursive: true });
         writeFileSync(this.settingsPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -419,6 +421,10 @@ export class ClientWorkspace {
 
   globalStats(folder: string): { files: number; characters: number } {
     return this.databaseStats("public", this.publicDatabasePath(folder));
+  }
+
+  globalLoaded(folder: string): boolean {
+    return Boolean(folder) && existsSync(this.publicDatabasePath(folder));
   }
 
   async createKnowledgeProposal(scope: KnowledgeScope, folder: string, input: CreateKnowledgeProposal, config: KnowledgeBackendConfig = localKnowledgeBackendConfig()): Promise<KnowledgeProposal> {
@@ -842,8 +848,8 @@ export function knowledgeBackendConfig(settings: VoiceBridgeSettings): Knowledge
   };
 }
 
-export function publicKnowledgeBackendConfig(): KnowledgeBackendConfig {
-  return localKnowledgeBackendConfig();
+export function publicKnowledgeBackendConfig(settings?: VoiceBridgeSettings): KnowledgeBackendConfig {
+  return settings ? knowledgeBackendConfig(settings) : localKnowledgeBackendConfig();
 }
 
 function localKnowledgeBackendConfig(): KnowledgeBackendConfig {

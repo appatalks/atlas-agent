@@ -98,9 +98,9 @@ meetings/
 
 `client-profile.json`, `context-drop/`, `knowledge/`, `skills/`, and `learnings/` are optional additive import sources. Selecting **Load context** first pulls the database client, then merges reviewed supplementary files into the client-ID-keyed local cache. The `meetings/` directory is never imported. Files or folders named `restricted`, and filenames containing `.restricted.`, are retained in the index but excluded from recall.
 
-Each client has a physically separate SQLite cache keyed by stable client ID. In ADX mode that cache materializes only the selected client's database, preserving identical FTS retrieval and low live-call latency. The shared public knowledge base remains a durable operator folder with its own local cache and is added to every client prompt. ATSLA chooses database routes from operator state and stable client identity, not caller text, and sends the reasoning model only bounded retrieved excerpts. The model receives no SQL, KQL, database selector, client registry, or database tool.
+Each client has a physically separate SQLite cache keyed by stable client ID. In ADX mode that cache materializes only the client database selected in the main **Client** window, preserving identical FTS retrieval and low live-call latency. The shared public knowledge base remains a durable operator folder with its own local cache and can synchronize through the default ADX database. ATSLA chooses database routes from operator state and stable client identity, not caller text, and sends the reasoning model only bounded retrieved excerpts. The model receives no SQL, KQL, database selector, client registry, or database tool.
 
-Sessions are persisted under `~/.local/share/voice-bridge/sessions/` and include their stable client ID. The application lists, opens, and renames only sessions belonging to the selected client. Starting a session requires a selected client and always sends the Standard Greeting once. Switching clients persists the prior session, clears live transcript/drafts/escalations, unloads client context, and starts with an empty session list when that client has no prior sessions.
+Sessions are persisted under `~/.local/share/voice-bridge/sessions/` and include their stable client scope. The application lists, opens, and renames only sessions belonging to the selected client or the dedicated public-only scope. Starting a session always sends the Standard Greeting once. Switching clients persists the prior session, clears live transcript/drafts/escalations, unloads client context, and starts with an empty session list when that scope has no prior sessions.
 
 When an optional supplementary folder is configured, remote observations and generated summaries can be staged under its `learnings/` directory. They do not enter active recall until an operator reviews the files and explicitly reloads that client. Verbatim transcript and summary files are stored under `meetings/` only when their respective retention options are enabled. Database-only clients retain sessions and reviewed knowledge proposals without requiring filesystem artifacts.
 
@@ -112,7 +112,7 @@ Supplementary client folders include `context-drop/`, an operator-friendly addit
 
 Use `context-drop/CONTEXT-GUARDRAILS.md` for client-specific policy. Write clear sections for **May Discuss**, **Sensitive Or Restricted**, and **Required Behavior**. Describe what to decline, what to escalate, and the safe alternative to provide. This file is loaded before the client reference material.
 
-For organization-wide policy, create `GLOBAL-GUARDRAILS.md` at the root of the durable shared public knowledge folder. Use [template-public-knowledgebase](template-public-knowledgebase) or [docs/GLOBAL-GUARDRAILS.template.md](docs/GLOBAL-GUARDRAILS.template.md) as a starting point. **Load context** refreshes this folder's local public cache before loading the selected client. Global guardrails are included for every session and take precedence over client guardrails. Reference files cannot override either level.
+For organization-wide policy, create `GLOBAL-GUARDRAILS.md` at the root of the durable shared public knowledge folder. Use [template-public-knowledgebase](template-public-knowledgebase) or [docs/GLOBAL-GUARDRAILS.template.md](docs/GLOBAL-GUARDRAILS.template.md) as a starting point. **Load context** refreshes this folder's local public cache and, in ADX mode, synchronizes it through the default public database before loading a selected client. Global guardrails are included for every session and take precedence over client guardrails. Reference files cannot override either level.
 
 Best practices:
 
@@ -128,7 +128,7 @@ Best practices:
 
 Imported files and operator policies are not writable by the conversation model. AI-generated meeting summaries create pending proposals under `ai/session-summaries/` in the active client's database. Proposed content is excluded from recall until an operator approves it in **Settings > Workspace**. Rejection leaves recall unchanged; approval publishes a new immutable document version; retirement proposals remove a document from recall without deleting its history.
 
-Proposal scope is resolved from operator state. Client proposal operations require explicitly loaded client context and synchronize to that client's configured backend. Public proposals remain in the durable shared folder's local knowledge store. Switching clients changes the proposal namespace immediately. Guardrail policies cannot be changed through the proposal API.
+Proposal scope is resolved from operator state. Client proposal operations require explicitly loaded client context and synchronize to that client's configured backend. Public proposals remain in the durable shared folder's local knowledge store and synchronize to the default public ADX database when ADX is active. Switching clients changes the proposal namespace immediately. Guardrail policies cannot be changed through the proposal API.
 
 ### Knowledge Backends And Routing
 
@@ -142,20 +142,19 @@ ATSLA_ADX_CLUSTER_URL=https://cluster.region.kusto.windows.net
 ATSLA_ADX_AUTH_MODE=device-code
 ```
 
-For production multi-client use, map every catalog client explicitly to its own ADX database. `ATSLA_ADX_DEFAULT_DATABASE` is an optional single-client fallback, not the recommended isolation boundary. Shared public knowledge stays folder-backed and does not require an ADX database.
+`ATSLA_ADX_DEFAULT_DATABASE` is reserved for shared public knowledge and is never used as a private-client fallback. The durable public folder remains authoritative while its local cache and portable snapshots synchronize through that database. Every private client must resolve to its own explicitly selected or uniquely matched ADX database.
 
 Database clients are stored in the administrator client catalog with a stable `id`. A supplementary `client-profile.json` mirrors that identity when a folder is attached. An optional `knowledgeDatabase` provides an explicit route. Resolution fails closed and uses this order:
 
-1. Explicit database in the selected client profile.
-2. Optional admin-configured default client database.
-3. One exact accessible database-name match against the stable ID or client name.
-4. Exactly one accessible database already containing that scope ID.
+1. Explicit database selected for the client in the main **Client** window.
+2. One exact accessible database-name match against the stable ID or client name.
+3. Exactly one accessible database already containing that scope ID.
 
-Missing and ambiguous routes are errors. Caller text and model output never participate in routing. **Discover** lists databases available to the authenticated admin, while the selected client ID and override remain visible in Workspace settings.
+Missing and ambiguous routes are errors. Caller text and model output never participate in routing. The main **Client** selector automatically lists databases available to the authenticated admin and offers a manual refresh. Workspace settings contain backend, authentication, cluster, and default public-database configuration, but no private-client selector.
 
 On first device-code use, open the displayed Microsoft device-login page and enter the code. The Kusto session is then stored under the dedicated `atsla-adx` identity cache. Set `ATSLA_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE=true` only on a trusted single-user machine when no OS credential store is available.
 
-A single default ADX database may be used for a single-client evaluation. For production multi-client isolation, use a separate ADX database and scoped RBAC identity per client with an explicit catalog mapping. Do not use one unrestricted identity across unrelated customer databases.
+Use a separate ADX database and scoped RBAC identity per private client. The default database carries only shared public knowledge. Do not use one unrestricted identity across unrelated customer databases.
 
 On **Load context**, ATSLA pulls the latest matching ADX snapshot when present, refreshes reviewed file imports locally, and appends the merged versioned snapshot back to the same resolved database. Approved proposals also synchronize after mutation. Explicit **Pull** and **Push** controls are available for recovery and administration.
 
@@ -266,8 +265,8 @@ Use **Glass transparency** to balance the layered background against dense text.
 | `GET /health` | Service readiness and active provider/voice details. |
 | `GET /v1/settings` | Read persisted operator settings. |
 | `PUT /v1/settings` | Update operator settings. |
-| `POST /v1/client-workspace` | Select or create a database client; optionally attach a supplementary folder. |
-| `POST /v1/context/load` | Pull the selected client backend, merge supplementary files, and refresh shared public context. |
+| `POST /v1/client-workspace` | Select/create a database client, attach a supplementary folder, or enter public-only mode. |
+| `POST /v1/context/load` | Load public-only context or refresh public knowledge before pulling and merging the selected client context. |
 | `POST /v1/context/clear` | Clear active client context. |
 | `GET /v1/knowledge/backend` | Read non-secret backend and ADX routing configuration. |
 | `GET /v1/knowledge/adx/databases` | Discover databases accessible to the configured admin identity. |
@@ -277,9 +276,9 @@ Use **Glass transparency** to balance the layered background against dense text.
 | `POST /v1/knowledge/:scope/proposals/:id/:decision` | Approve or reject a scoped proposal. |
 | `GET /v1/knowledge/:scope/export` | Export a portable scoped knowledge snapshot. |
 | `POST /v1/knowledge/:scope/import` | Import a same-scope portable snapshot and synchronize the active backend. |
-| `POST /v1/knowledge/:scope/sync` | Explicitly pull or push client knowledge; public scope remains local. |
-| `GET /v1/sessions` | List sessions for the selected stable client ID only. |
-| `POST /v1/sessions` | Start a selected-client session and send the Standard Greeting. |
+| `POST /v1/knowledge/:scope/sync` | Explicitly pull or push client or public knowledge through the configured backend. |
+| `GET /v1/sessions` | List sessions for the selected client or public-only scope. |
+| `POST /v1/sessions` | Start a selected-client or public-only session and send the Standard Greeting. |
 | `POST /v1/transcripts` | Submit a transcript event. |
 | `POST /v1/drafts` | Generate a draft response. |
 | `POST /v1/drafts/:draftId/authorize` | Speak an approved draft. |

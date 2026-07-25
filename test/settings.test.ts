@@ -207,6 +207,23 @@ describe("default voice profile", () => {
     }
   });
 
+  it("persists public-only operation even when client catalog entries exist", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-public-only-settings-"));
+    try {
+      const path = join(root, "settings.json");
+      const store = new SettingsStore(path);
+      store.update({
+        clients: [{ id: "known-client", name: "Known Client", knowledgeDatabase: "known-client", supplementaryContextPath: "" }],
+        activeClientId: "known-client",
+      });
+      store.update({ activeClientId: "" });
+
+      expect(new SettingsStore(path).get()).toMatchObject({ activeClientId: "", clientWorkspace: "" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes a Data Explorer portal link without hardcoding its endpoint", () => {
     const root = mkdtempSync(join(tmpdir(), "voice-bridge-adx-settings-"));
     try {
