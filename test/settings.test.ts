@@ -109,6 +109,7 @@ describe("default voice profile", () => {
     expect(defaults.ttsEngineUrl).toBe("http://127.0.0.1:8090/");
     expect(defaults.responseMode).toBe("autonomous");
     expect(defaults.defaultInputMode).toBe("agent");
+    expect(defaults.copilotModel).toBe("gpt-5.6-luna");
     expect(defaults.copilotReasoningEffort).toBe("default");
   });
 

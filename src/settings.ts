@@ -123,7 +123,7 @@ export function defaultSettings(): VoiceBridgeSettings {
     defaultInputMode: "agent",
     modelProvider: "local-qwen",
     inputModel: "qwen3-8b",
-    copilotModel: "auto",
+    copilotModel: "gpt-5.6-luna",
     copilotReasoningEffort: "default",
     ttsEngineUrl: process.env.LOCAL_VOICE_BRIDGE_URL ?? process.env.VOICE_BRIDGE_REMOTE_TTS_URL ?? "http://127.0.0.1:8090/",
     voiceProfile: "AppaTalks",
