@@ -26,7 +26,7 @@ describe("persistent meeting sessions", () => {
       );
 
       const clientWorkspace = join(root, "clients", "northwind");
-      coordinator.updateSettings({ clientWorkspace });
+      coordinator.selectClientWorkspace({ name: "Northwind", supplementaryContextPath: clientWorkspace });
       const first = await coordinator.createSession({ title: "Northwind kickoff" });
       expect(first.greetingSent).toBe(true);
       expect(coordinator.state().drafts.filter((draft) => draft.question === "Operator template")).toHaveLength(1);
@@ -63,7 +63,7 @@ describe("persistent meeting sessions", () => {
         workspace,
         sessions,
       );
-      coordinator.updateSettings({ clientWorkspace: join(root, "clients", "northwind") });
+      coordinator.selectClientWorkspace({ name: "Northwind", supplementaryContextPath: join(root, "clients", "northwind") });
       const northwind = await coordinator.createSession({ title: "Northwind review" });
       expect(coordinator.listSessions()).toMatchObject([{ id: northwind.id }]);
 
@@ -71,8 +71,36 @@ describe("persistent meeting sessions", () => {
       expect(coordinator.listSessions()).toEqual([]);
       const contoso = await coordinator.createSession({ title: "Contoso review" });
       expect(coordinator.listSessions()).toMatchObject([{ id: contoso.id }]);
-      expect(() => coordinator.selectSession(northwind.id)).toThrow("different client workspace");
-      expect(() => coordinator.renameSession(northwind.id, "Cross-client rename")).toThrow("different client workspace");
+      expect(() => coordinator.selectSession(northwind.id)).toThrow("different client");
+      expect(() => coordinator.renameSession(northwind.id, "Cross-client rename")).toThrow("different client");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("isolates database-only client sessions without supplementary folders", async () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-database-sessions-"));
+    try {
+      const coordinator = new MeetingCoordinator(
+        new SimulationProvider(),
+        new ResponsePolicy("autonomous"),
+        new DraftStore(),
+        new SimulatedSpeechOutput(),
+        undefined,
+        new ClientWorkspace(join(root, "clients"), undefined, join(root, "cache")),
+        new SessionStore(join(root, "sessions")),
+      );
+      coordinator.selectClientWorkspace({ clientId: "fintech-demo-1", name: "Fintech Demo 1", database: "fintech-demo-1" });
+      const fintech = await coordinator.createSession({ title: "Fintech database session" });
+      expect(fintech).toMatchObject({ clientId: "fintech-demo-1", clientWorkspace: "" });
+
+      coordinator.selectClientWorkspace({ clientId: "healthcare-demo-2", name: "Healthcare Demo 2", database: "healthcare-demo-2" });
+      const healthcare = await coordinator.createSession({ title: "Healthcare database session" });
+      expect(coordinator.listSessions()).toMatchObject([{ id: healthcare.id, clientId: "healthcare-demo-2" }]);
+      expect(() => coordinator.selectSession(fintech.id)).toThrow("different client");
+
+      coordinator.selectClientWorkspace({ clientId: "fintech-demo-1" });
+      expect(coordinator.listSessions()).toMatchObject([{ id: fintech.id, clientId: "fintech-demo-1" }]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

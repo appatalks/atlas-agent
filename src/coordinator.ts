@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
 import { NO_RESPONSE_SENTINEL, responseTemplates, type AgentActivity, type ChatProvider, type Draft, type EscalationRequest, type LocalModelId, type MeetingSession, type MeetingSessionSummary, type ModelReply, type ResponseMode, type SessionTelemetry, type TranscriptEvent } from "./domain.js";
 import { DraftStore, ResponsePolicy } from "./policy.js";
-import { type VoiceBridgeSettings, ClientWorkspace, SettingsStore, defaultSettings } from "./settings.js";
+import { type VoiceBridgeSettings, type ClientConfiguration, ClientWorkspace, SettingsStore, defaultSettings, knowledgeBackendConfig, publicKnowledgeBackendConfig } from "./settings.js";
 import { type SpeechDispatch, type SpeechOutput } from "./voice.js";
 import { SessionStore } from "./session-store.js";
+import { type CreateKnowledgeProposal, type KnowledgeProposal, type KnowledgeScope, type KnowledgeSnapshot } from "./knowledge-store.js";
+import { type KnowledgeSyncResult } from "./knowledge-backend.js";
 
 export class MeetingCoordinator {
   private readonly transcript: TranscriptEvent[] = [];
@@ -15,7 +17,7 @@ export class MeetingCoordinator {
   private autonomousTimer: NodeJS.Timeout | undefined;
   private responseEpoch = 0;
   private settings: VoiceBridgeSettings;
-  private loadedClientWorkspace = "";
+  private loadedClientId = "";
   private activeSession: MeetingSession | undefined;
   private readonly telemetry: SessionTelemetry = {
     startedAt: new Date().toISOString(),
@@ -44,8 +46,24 @@ export class MeetingCoordinator {
     if (this.settings.globalKnowledgeEnabled && this.settings.globalKnowledgePath) {
       this.settings.globalKnowledgePath = this.workspace.prepareGlobalKnowledge(this.settings.globalKnowledgePath);
     }
-    if (this.settings.clientWorkspace) {
-      this.settings.clientWorkspace = this.workspace.select({ path: this.settings.clientWorkspace });
+    if (this.settings.clientWorkspace && !this.settings.clients.length) {
+      const supplementaryContextPath = this.workspace.select({ path: this.settings.clientWorkspace });
+      const identity = this.workspace.clientKnowledgeIdentity(supplementaryContextPath);
+      this.settings = this.settingsStore?.update({
+        clients: [{ id: identity.clientId, name: identity.name, knowledgeDatabase: identity.knowledgeDatabase, supplementaryContextPath }],
+        activeClientId: identity.clientId,
+        clientWorkspace: supplementaryContextPath,
+      }) ?? {
+        ...this.settings,
+        clients: [{ id: identity.clientId, name: identity.name, knowledgeDatabase: identity.knowledgeDatabase, supplementaryContextPath }],
+        activeClientId: identity.clientId,
+        clientWorkspace: supplementaryContextPath,
+      };
+    }
+    const activeClient = this.activeClient();
+    if (activeClient?.supplementaryContextPath) {
+      activeClient.supplementaryContextPath = this.workspace.select({ path: activeClient.supplementaryContextPath });
+      this.settings.clientWorkspace = activeClient.supplementaryContextPath;
     }
     this.policy.setMode(this.settings.responseMode);
   }
@@ -56,15 +74,16 @@ export class MeetingCoordinator {
     this.record("listening", `${event.speaker === "remote" ? "Heard" : "Received"}: ${event.text}`);
     if (event.speaker === "remote" && isNonActionableTranscript(event.text)) {
       if (this.settings.saveMeetingLog) {
-        this.workspace.appendTranscript(this.settings.clientWorkspace, `- ${event.occurredAt} Remote non-speech: ${event.text}`);
+        this.workspace.appendTranscript(this.activeClient()?.supplementaryContextPath ?? "", `- ${event.occurredAt} Remote non-speech: ${event.text}`);
       }
       this.record("stopped", "Non-speech audio documented; no agent reply was produced.");
       this.persistSession();
       return;
     }
-    if (event.speaker === "remote" && this.activeSession && this.settings.retainSessionLearnings && this.settings.clientWorkspace) {
+    const supplementaryContextPath = this.activeClient()?.supplementaryContextPath ?? "";
+    if (event.speaker === "remote" && this.activeSession && this.settings.retainSessionLearnings && supplementaryContextPath) {
       this.workspace.appendLearning(
-        this.settings.clientWorkspace,
+        supplementaryContextPath,
         this.activeSession.id,
         `- ${event.occurredAt} — ${event.text}`,
       );
@@ -74,7 +93,7 @@ export class MeetingCoordinator {
       return;
     }
     if (event.speaker === "remote" && this.settings.saveMeetingLog) {
-      this.workspace.appendTranscript(this.settings.clientWorkspace, `- ${event.occurredAt} Remote: ${event.text}`);
+      this.workspace.appendTranscript(supplementaryContextPath, `- ${event.occurredAt} Remote: ${event.text}`);
     }
     if (event.speaker === "remote" && this.shouldReplyAutonomously(event.text)) {
       if (/\b(agent|assistant|eva)\b/i.test(event.text)) await this.autonomousReply();
@@ -133,7 +152,10 @@ export class MeetingCoordinator {
   }
 
   updateSettings(partial: Partial<VoiceBridgeSettings>): VoiceBridgeSettings {
-    const proposedClient = typeof partial.clientWorkspace === "string" ? partial.clientWorkspace : this.settings.clientWorkspace;
+    const partialClients = Array.isArray(partial.clients) ? partial.clients : this.settings.clients;
+    const partialActiveId = typeof partial.activeClientId === "string" ? partial.activeClientId : this.settings.activeClientId;
+    const proposedClient = partialClients.find((client) => client.id === partialActiveId)?.supplementaryContextPath
+      ?? (typeof partial.clientWorkspace === "string" ? partial.clientWorkspace : this.settings.clientWorkspace);
     const proposedGlobal = typeof partial.globalKnowledgePath === "string" ? partial.globalKnowledgePath : this.settings.globalKnowledgePath;
     if (proposedClient && proposedGlobal && pathsOverlap(proposedClient, proposedGlobal)) {
       throw new Error("Global knowledge and the client workspace must be separate, non-overlapping folders.");
@@ -154,48 +176,88 @@ export class MeetingCoordinator {
     if (provider.setModelKey && this.settings.inputModel in { "qwen3-8b": true, "qwen2.5-7b": true, "qwen2.5-1.5b": true, "qwen3-0.6b": true }) {
       provider.setModelKey(this.settings.inputModel as LocalModelId);
     }
-    if (this.settings.clientWorkspace) this.settings.clientWorkspace = this.workspace.select({ path: this.settings.clientWorkspace });
+    const activeClient = this.activeClient();
+    if (activeClient?.supplementaryContextPath) {
+      activeClient.supplementaryContextPath = this.workspace.select({ path: activeClient.supplementaryContextPath });
+      this.settings.clientWorkspace = activeClient.supplementaryContextPath;
+    } else {
+      this.settings.clientWorkspace = "";
+    }
     return this.getSettings();
   }
 
-  selectClientWorkspace(request: { path?: string; name?: string }): VoiceBridgeSettings {
+  selectClientWorkspace(request: { clientId?: string; path?: string; name?: string; database?: string; supplementaryContextPath?: string }): VoiceBridgeSettings {
     this.persistSession();
     this.resetConversation();
     this.activeSession = undefined;
-    this.loadedClientWorkspace = "";
-    const clientWorkspace = this.workspace.select(request);
-    return this.updateSettings({ clientWorkspace, recentClientWorkspaces: [clientWorkspace, ...this.settings.recentClientWorkspaces.filter((folder) => folder !== clientWorkspace)] });
+    this.loadedClientId = "";
+    const clients = structuredClone(this.settings.clients);
+    let client = request.clientId ? clients.find((item) => item.id === request.clientId) : undefined;
+    if (!client && request.path?.trim()) {
+      const supplementaryContextPath = this.workspace.select({ path: request.path });
+      const identity = this.workspace.clientKnowledgeIdentity(supplementaryContextPath);
+      client = clients.find((item) => item.id === identity.clientId);
+      if (!client) {
+        client = { id: identity.clientId, name: identity.name, knowledgeDatabase: identity.knowledgeDatabase, supplementaryContextPath };
+        clients.push(client);
+      }
+    }
+    if (!client && request.name?.trim()) {
+      client = {
+        id: request.clientId?.trim() || `client-${randomUUID()}`,
+        name: request.name.trim().slice(0, 120),
+        knowledgeDatabase: request.database?.trim() ?? "",
+        supplementaryContextPath: request.supplementaryContextPath?.trim() ?? "",
+      };
+      clients.push(client);
+    }
+    if (!client) throw new Error("Select an existing client or provide a client name.");
+    if (typeof request.database === "string") client.knowledgeDatabase = request.database.trim();
+    if (typeof request.supplementaryContextPath === "string") client.supplementaryContextPath = request.supplementaryContextPath.trim();
+    const clientWorkspace = client.supplementaryContextPath;
+    return this.updateSettings({
+      clients,
+      activeClientId: client.id,
+      clientWorkspace,
+      recentClientWorkspaces: clientWorkspace ? [clientWorkspace, ...this.settings.recentClientWorkspaces.filter((folder) => folder !== clientWorkspace)] : this.settings.recentClientWorkspaces,
+    });
   }
 
-  loadClientContext(): { loaded: boolean; path: string; files: number; characters: number } {
-    if (!this.settings.clientWorkspace) throw new Error("Select a client workspace before loading context.");
-    const selected = this.workspace.select({ path: this.settings.clientWorkspace });
-    if (this.settings.globalKnowledgePath && pathsOverlap(selected, this.settings.globalKnowledgePath)) {
+  async loadClientContext(): Promise<{ loaded: boolean; path: string; files: number; characters: number; documents: number; chunks: number; databasePath: string; backend: "sqlite" | "adx"; database: string; routeSource: string; pulled: boolean; pushed: boolean }> {
+    const client = this.requireActiveClient();
+    const selected = client.supplementaryContextPath ? this.workspace.select({ path: client.supplementaryContextPath }) : "";
+    if (selected && this.settings.globalKnowledgePath && pathsOverlap(selected, this.settings.globalKnowledgePath)) {
       throw new Error("The selected client workspace overlaps the global knowledge folder.");
     }
-    this.loadedClientWorkspace = selected;
-    const stats = this.workspace.contextStats(selected);
-    this.record("listening", `Loaded client context from ${selected} (${stats.files} files).`);
+    const backend = knowledgeBackendConfig(this.settings);
+    if (this.settings.globalKnowledgeEnabled && this.settings.globalKnowledgePath) {
+      await this.workspace.loadGlobalKnowledge(this.settings.globalKnowledgePath, publicKnowledgeBackendConfig());
+    }
+    const stats = await this.workspace.loadClient(client, backend);
+    this.loadedClientId = client.id;
+    this.record("listening", `Loaded client context for ${client.name} from ${stats.database} (${stats.files} indexed files).`);
     return { loaded: true, path: selected, ...stats };
   }
 
   clearClientContext(): { loaded: boolean; path: string; files: number; characters: number } {
-    const previous = this.loadedClientWorkspace;
-    this.loadedClientWorkspace = "";
+    const previous = this.loadedClientId;
+    this.loadedClientId = "";
     this.record("stopped", previous ? `Cleared client context from ${previous}.` : "Client context is already clear.");
     return { loaded: false, path: "", files: 0, characters: 0 };
   }
 
   contextStatus(): {
     selectedClientWorkspace: string;
+    selectedClientId: string;
     client: { loaded: boolean; path: string; files: number; characters: number };
     global: { enabled: boolean; path: string; files: number; characters: number };
   } {
-    const clientStats = this.loadedClientWorkspace ? this.workspace.contextStats(this.loadedClientWorkspace) : { files: 0, characters: 0 };
+    const clientStats = this.loadedClientId ? this.workspace.clientStats(this.loadedClientId) : { files: 0, characters: 0 };
     const globalStats = this.settings.globalKnowledgeEnabled ? this.workspace.globalStats(this.settings.globalKnowledgePath) : { files: 0, characters: 0 };
     return {
       selectedClientWorkspace: this.settings.clientWorkspace,
-      client: { loaded: Boolean(this.loadedClientWorkspace), path: this.loadedClientWorkspace, ...clientStats },
+      selectedClientId: this.settings.activeClientId,
+      client: { loaded: Boolean(this.loadedClientId), path: this.activeClient()?.supplementaryContextPath ?? "", ...clientStats },
       global: { enabled: this.settings.globalKnowledgeEnabled, path: this.settings.globalKnowledgePath, ...globalStats },
     };
   }
@@ -212,11 +274,11 @@ export class MeetingCoordinator {
 
   async createSession(request: { title?: string }): Promise<MeetingSession> {
     if (!this.sessionStore) throw new Error("Session persistence is unavailable.");
-    if (!this.settings.clientWorkspace) throw new Error("Select a client workspace before starting a session.");
+    const client = this.requireActiveClient();
     this.persistSession();
     this.resetConversation();
-    const clientWorkspace = this.settings.clientWorkspace;
-    this.activeSession = this.sessionStore.create(request.title, clientWorkspace);
+    const clientWorkspace = client.supplementaryContextPath;
+    this.activeSession = this.sessionStore.create(request.title, client.id, clientWorkspace);
     this.record("listening", `Session started: ${this.activeSession.title}`);
     this.persistSession();
     const greeting = responseTemplates.find((template) => template.id === "standard-greeting")!;
@@ -233,12 +295,12 @@ export class MeetingCoordinator {
 
   selectSession(sessionId: string): MeetingSession {
     if (!this.sessionStore) throw new Error("Session persistence is unavailable.");
-    if (!this.settings.clientWorkspace) throw new Error("Select a client workspace before opening a session.");
+    const client = this.requireActiveClient();
     this.persistSession();
     this.resetConversation();
-    this.loadedClientWorkspace = "";
+    this.loadedClientId = "";
     const session = this.sessionStore.get(sessionId);
-    if (session.clientWorkspace !== this.settings.clientWorkspace) throw new Error("This session belongs to a different client workspace.");
+    if (session.clientId !== client.id) throw new Error("This session belongs to a different client.");
     this.activeSession = structuredClone(session);
     this.transcript.push(...structuredClone(session.transcript));
     this.activity.push(...structuredClone(session.activity));
@@ -252,7 +314,7 @@ export class MeetingCoordinator {
   renameSession(sessionId: string, title: string): MeetingSession {
     if (!this.sessionStore) throw new Error("Session persistence is unavailable.");
     const existing = this.sessionStore.get(sessionId);
-    if (existing.clientWorkspace !== this.settings.clientWorkspace) throw new Error("This session belongs to a different client workspace.");
+    if (existing.clientId !== this.requireActiveClient().id) throw new Error("This session belongs to a different client.");
     const session = this.sessionStore.rename(sessionId, title);
     if (this.activeSession?.id === sessionId) this.activeSession = structuredClone(session);
     this.record("listening", `Session renamed: ${session.title}`);
@@ -261,29 +323,88 @@ export class MeetingCoordinator {
   }
 
   listSessions(): MeetingSessionSummary[] {
-    return this.sessionStore?.list(this.settings.clientWorkspace) ?? [];
+    return this.sessionStore?.list(this.settings.activeClientId) ?? [];
   }
 
   activeSessionInfo(): { id: string; title: string } | null {
     return this.activeSession ? { id: this.activeSession.id, title: this.activeSession.title } : null;
   }
 
-  async summarizeMeeting(): Promise<{ text: string; path: string }> {
+  async summarizeMeeting(): Promise<{ text: string; path: string; proposal?: KnowledgeProposal }> {
     const reply = await this.provider.complete({
       transcript: this.transcript,
       question: this.enrichQuestion("Summarize the current meeting in concise bullets: decisions, open questions, and next steps."),
     });
     this.recordUsage(reply);
-    const path = this.settings.summarizeMeeting ? this.workspace.appendSummary(this.settings.clientWorkspace, reply.text) : "";
-    if (this.activeSession && this.settings.retainSessionLearnings && this.settings.clientWorkspace) {
+    const client = this.activeClient();
+    const supplementaryPath = client?.supplementaryContextPath ?? "";
+    const path = this.settings.summarizeMeeting ? this.workspace.appendSummary(supplementaryPath, reply.text) : "";
+    if (this.activeSession && this.settings.retainSessionLearnings && supplementaryPath) {
       this.workspace.appendLearning(
-        this.settings.clientWorkspace,
+        supplementaryPath,
         this.activeSession.id,
         `\n## Generated session summary — ${new Date().toISOString()}\n${reply.text}\n`,
       );
     }
+    const proposal = this.activeSession && client && this.loadedClientId === client.id
+      ? await this.workspace.createClientKnowledgeProposal(client, {
+        operation: "upsert",
+        sourcePath: `ai/session-summaries/${this.activeSession.id}.md`,
+        title: `Session summary: ${this.activeSession.title}`,
+        content: reply.text,
+        evidenceSessionId: this.activeSession.id,
+      }, knowledgeBackendConfig(this.settings))
+      : undefined;
     this.record("thinking", "Meeting summary updated.");
-    return { text: reply.text, path };
+    return { text: reply.text, path, proposal };
+  }
+
+  createKnowledgeProposal(scope: KnowledgeScope, input: CreateKnowledgeProposal): Promise<KnowledgeProposal> {
+    if (scope === "client") return this.workspace.createClientKnowledgeProposal(this.requireLoadedClient(), {
+      ...input,
+      evidenceSessionId: input.evidenceSessionId || this.activeSession?.id,
+    }, knowledgeBackendConfig(this.settings));
+    return this.workspace.createKnowledgeProposal(scope, this.knowledgeFolder(scope), input, publicKnowledgeBackendConfig());
+  }
+
+  listKnowledgeProposals(scope: KnowledgeScope, status: KnowledgeProposal["status"] | "all" = "pending"): KnowledgeProposal[] {
+    return scope === "client"
+      ? this.workspace.listClientKnowledgeProposals(this.requireLoadedClient().id, status)
+      : this.workspace.listKnowledgeProposals(scope, this.knowledgeFolder(scope), status);
+  }
+
+  reviewKnowledgeProposal(scope: KnowledgeScope, proposalId: string, decision: "approve" | "reject"): Promise<KnowledgeProposal> {
+    return scope === "client"
+      ? this.workspace.reviewClientKnowledgeProposal(this.requireLoadedClient(), proposalId, decision, knowledgeBackendConfig(this.settings))
+      : this.workspace.reviewKnowledgeProposal(scope, this.knowledgeFolder(scope), proposalId, decision, publicKnowledgeBackendConfig());
+  }
+
+  exportKnowledge(scope: KnowledgeScope): KnowledgeSnapshot {
+    return scope === "client"
+      ? this.workspace.exportClientKnowledgeSnapshot(this.requireLoadedClient().id)
+      : this.workspace.exportKnowledgeSnapshot(scope, this.knowledgeFolder(scope));
+  }
+
+  importKnowledge(scope: KnowledgeScope, snapshot: KnowledgeSnapshot): Promise<KnowledgeSyncResult> {
+    return scope === "client"
+      ? this.workspace.importClientKnowledgeSnapshot(this.requireLoadedClient(), snapshot, knowledgeBackendConfig(this.settings))
+      : this.workspace.importKnowledgeSnapshot(scope, this.knowledgeFolder(scope), snapshot, publicKnowledgeBackendConfig());
+  }
+
+  pullKnowledge(scope: KnowledgeScope): Promise<KnowledgeSyncResult> {
+    return scope === "client"
+      ? this.workspace.pullClientKnowledge(this.requireLoadedClient(), knowledgeBackendConfig(this.settings))
+      : this.workspace.pullKnowledge(scope, this.knowledgeFolder(scope), publicKnowledgeBackendConfig());
+  }
+
+  pushKnowledge(scope: KnowledgeScope): Promise<KnowledgeSyncResult> {
+    return scope === "client"
+      ? this.workspace.pushClientKnowledge(this.requireLoadedClient(), knowledgeBackendConfig(this.settings))
+      : this.workspace.pushKnowledge(scope, this.knowledgeFolder(scope), publicKnowledgeBackendConfig());
+  }
+
+  listAdxDatabases(): Promise<string[]> {
+    return this.workspace.listAdxDatabases(knowledgeBackendConfig(this.settings));
   }
 
   workspaceStatus(): { clientWorkspace: string; latestSummary: string } {
@@ -291,6 +412,24 @@ export class MeetingCoordinator {
       clientWorkspace: this.settings.clientWorkspace,
       latestSummary: this.workspace.latestSummary(this.settings.clientWorkspace),
     };
+  }
+
+  clientKnowledgeRoute(): { clientId: string; name: string; knowledgeDatabase: string; supplementaryContextPath: string } | null {
+    const client = this.activeClient();
+    return client ? { clientId: client.id, name: client.name, knowledgeDatabase: client.knowledgeDatabase, supplementaryContextPath: client.supplementaryContextPath } : null;
+  }
+
+  setClientKnowledgeRoute(request: { database: string; supplementaryContextPath?: string }): { clientId: string; name: string; knowledgeDatabase: string; supplementaryContextPath: string } {
+    const client = this.requireActiveClient();
+    this.loadedClientId = "";
+    const clients = this.settings.clients.map((item) => item.id === client.id ? {
+      ...item,
+      knowledgeDatabase: request.database.trim(),
+      supplementaryContextPath: typeof request.supplementaryContextPath === "string" ? request.supplementaryContextPath.trim() : item.supplementaryContextPath,
+    } : item);
+    this.updateSettings({ clients });
+    const updated = this.requireActiveClient();
+    return { clientId: updated.id, name: updated.name, knowledgeDatabase: updated.knowledgeDatabase, supplementaryContextPath: updated.supplementaryContextPath };
   }
 
   acknowledgeEscalation(escalationId: string): EscalationRequest {
@@ -387,7 +526,7 @@ export class MeetingCoordinator {
   private async speak(draft: Draft): Promise<SpeechDispatch> {
     this.record("speaking", "Speaking through the selected call microphone.", draft.id);
     if (this.settings.saveMeetingLog) {
-      this.workspace.appendTranscript(this.settings.clientWorkspace, `- ${new Date().toISOString()} Agent: ${draft.reply.text}`);
+      this.workspace.appendTranscript(this.activeClient()?.supplementaryContextPath ?? "", `- ${new Date().toISOString()} Agent: ${draft.reply.text}`);
     }
     const voiceProfile = this.settings.voiceProfiles.find((item) => item.name === this.settings.voiceProfile || item.id === this.settings.voiceProfile.toLowerCase()) ?? this.settings.voiceProfiles[0];
     return this.speech.dispatch(draft, {
@@ -405,10 +544,11 @@ export class MeetingCoordinator {
   private enrichQuestion(question: string): string {
     const profile = this.settings.profiles.find((item) => item.id === this.settings.activeProfileId) ?? this.settings.profiles[0];
     const voiceProfile = this.settings.voiceProfiles.find((item) => item.name === this.settings.voiceProfile || item.id === this.settings.voiceProfile.toLowerCase()) ?? this.settings.voiceProfiles[0];
-    const clientGuardrails = this.loadedClientWorkspace ? this.workspace.clientGuardrails(this.loadedClientWorkspace) : "";
-    const clientKnowledge = this.loadedClientWorkspace ? this.workspace.context(this.loadedClientWorkspace) : "";
+    const client = this.loadedClientId ? this.activeClient() : undefined;
+    const clientGuardrails = client ? this.workspace.guardrailsForClient(client.id) : "";
+    const clientKnowledge = client ? this.workspace.contextForClient(client.id, question) : "";
     const globalGuardrails = this.settings.globalKnowledgeEnabled ? this.workspace.globalGuardrails(this.settings.globalKnowledgePath) : "";
-    const globalKnowledge = this.settings.globalKnowledgeEnabled ? this.workspace.globalContext(this.settings.globalKnowledgePath) : "";
+    const globalKnowledge = this.settings.globalKnowledgeEnabled ? this.workspace.globalContext(this.settings.globalKnowledgePath, question) : "";
     const profileContext = profile ? `Agent profile: ${profile.name}. Tone: ${profile.tone}. Voice style: ${profile.voiceStyle}. Instructions: ${profile.instructions}` : "";
     const voiceContext = voiceProfile ? `Voice profile: ${voiceProfile.name}. Voice instructions: ${voiceProfile.instructions}` : "";
     return [
@@ -418,7 +558,7 @@ export class MeetingCoordinator {
       globalGuardrails ? `Global guardrails (apply every session):\n${globalGuardrails}` : "",
       clientGuardrails ? `Client guardrails (apply only to the active client):\n${clientGuardrails}` : "",
       globalKnowledge ? `Global shared knowledge:\n${globalKnowledge}` : "",
-      clientKnowledge ? `Exclusive active-client reference material (${this.loadedClientWorkspace}):\n${clientKnowledge}` : "No client-specific context is loaded.",
+      clientKnowledge ? `Exclusive active-client reference material (${client?.name}, ${client?.id}):\n${clientKnowledge}` : "No client-specific context is loaded.",
       `Request: ${question}`,
     ].filter(Boolean).join("\n\n");
   }
@@ -443,12 +583,40 @@ export class MeetingCoordinator {
     if (!this.sessionStore || !this.activeSession) return;
     this.activeSession = this.sessionStore.save({
       ...this.activeSession,
-      clientWorkspace: this.settings.clientWorkspace,
+      clientId: this.settings.activeClientId,
+      clientWorkspace: this.activeClient()?.supplementaryContextPath ?? "",
       transcript: structuredClone(this.transcript),
       drafts: this.drafts.list(),
       activity: structuredClone(this.activity),
       escalations: structuredClone(this.escalations),
     });
+  }
+
+  private knowledgeFolder(scope: KnowledgeScope): string {
+    if (scope === "public") {
+      if (!this.settings.globalKnowledgeEnabled) throw new Error("Public knowledge is disabled.");
+      return this.settings.globalKnowledgePath;
+    }
+    if (!this.settings.activeClientId || this.loadedClientId !== this.settings.activeClientId) {
+      throw new Error("Load the selected client context before accessing its knowledge proposals.");
+    }
+    return this.settings.globalKnowledgePath;
+  }
+
+  private activeClient(): ClientConfiguration | undefined {
+    return this.settings.clients.find((client) => client.id === this.settings.activeClientId);
+  }
+
+  private requireActiveClient(): ClientConfiguration {
+    const client = this.activeClient();
+    if (!client) throw new Error("Select a client before continuing.");
+    return client;
+  }
+
+  private requireLoadedClient(): ClientConfiguration {
+    const client = this.requireActiveClient();
+    if (this.loadedClientId !== client.id) throw new Error("Load the selected client context before accessing its knowledge.");
+    return client;
   }
 
   private resetConversation(): void {

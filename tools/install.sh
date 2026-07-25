@@ -31,10 +31,23 @@ EOF
 check_linux_prerequisites() {
   for command in node npm python3 ffmpeg jq cmake pactl pw-cat; do
     if ! command -v "$command" >/dev/null 2>&1; then
-      echo "Missing $command. Install Node.js, Python 3.11+, FFmpeg, jq, CMake, and PipeWire/PulseAudio compatibility packages, then rerun." >&2
+      echo "Missing $command. Install Node.js 24+, Python 3.11+, FFmpeg, jq, CMake, and PipeWire/PulseAudio compatibility packages, then rerun." >&2
       exit 1
     fi
   done
+}
+
+check_node_runtime() {
+  local node_major
+  node_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
+  if [[ ! "$node_major" =~ ^[0-9]+$ ]] || (( node_major < 24 )); then
+    echo "ATSLA requires Node.js 24 or newer for its built-in SQLite knowledge store. Found: $(node --version)" >&2
+    exit 1
+  fi
+  node -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(":memory:"); const enabled = db.prepare("SELECT sqlite_compileoption_used(\"ENABLE_FTS5\") AS enabled").get().enabled; db.close(); if (!enabled) process.exit(1)' || {
+    echo "This Node.js build does not provide the required node:sqlite FTS5 support." >&2
+    exit 1
+  }
 }
 
 setup_voice_module() {
@@ -117,6 +130,7 @@ main() {
     *) echo "Unsupported OS: $OS" >&2; exit 1 ;;
   esac
   need node
+  check_node_runtime
   need npm
   need git
   need curl

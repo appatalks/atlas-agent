@@ -13,8 +13,12 @@ import { MacVoiceOutput, PipeWireVoiceOutput } from "./voice.js";
 import { AudioControl } from "./audio-control.js";
 import { ClientWorkspace, SettingsStore } from "./settings.js";
 import { SessionStore } from "./session-store.js";
+import { type KnowledgeProposal, type KnowledgeProposalOperation, type KnowledgeScope, type KnowledgeSnapshot } from "./knowledge-store.js";
 
 const responseModes: ResponseMode[] = ["disabled", "suggest", "approval", "guarded-autonomous", "autonomous"];
+const knowledgeScopes: KnowledgeScope[] = ["client", "public"];
+const knowledgeProposalStatuses: Array<KnowledgeProposal["status"] | "all"> = ["pending", "approved", "rejected", "all"];
+const knowledgeProposalOperations: KnowledgeProposalOperation[] = ["upsert", "retire"];
 
 async function isReachable(endpoint: URL | undefined, authToken?: string): Promise<boolean> {
   if (!endpoint) return false;
@@ -98,14 +102,94 @@ export function buildServer() {
   });
   app.get("/v1/settings", async () => coordinator.getSettings());
   app.put<{ Body: Record<string, unknown> }>("/v1/settings", async (request) => coordinator.updateSettings(request.body));
-  app.post<{ Body: { path?: string; name?: string } }>("/v1/client-workspace", async (request) => coordinator.selectClientWorkspace(request.body));
+  app.post<{ Body: { clientId?: string; path?: string; name?: string; database?: string; supplementaryContextPath?: string } }>("/v1/client-workspace", async (request, reply) => {
+    try { return coordinator.selectClientWorkspace(request.body); }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Client selection failed." }); }
+  });
   app.get("/v1/client-workspace/status", async () => coordinator.workspaceStatus());
+  app.get("/v1/client-workspace/knowledge-route", async () => ({ route: coordinator.clientKnowledgeRoute() }));
+  app.put<{ Body: { database?: string; supplementaryContextPath?: string } }>("/v1/client-workspace/knowledge-route", async (request, reply) => {
+    if (typeof request.body.database !== "string") return reply.code(400).send({ error: "database is required." });
+    try { return { route: coordinator.setClientKnowledgeRoute({ database: request.body.database, supplementaryContextPath: request.body.supplementaryContextPath }) }; }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Client knowledge route update failed." }); }
+  });
   app.get("/v1/context/status", async () => coordinator.contextStatus());
   app.post("/v1/context/load", async (_request, reply) => {
-    try { return coordinator.loadClientContext(); }
+    try { return await coordinator.loadClientContext(); }
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Client context load failed." }); }
   });
   app.post("/v1/context/clear", async () => coordinator.clearClientContext());
+  app.get("/v1/knowledge/backend", async () => {
+    const settings = coordinator.getSettings();
+    return {
+      backend: settings.knowledgeBackend,
+      adx: {
+        configured: Boolean(settings.adxClusterUrl),
+        clusterUrl: settings.adxClusterUrl,
+        authMode: settings.adxAuthMode,
+        defaultDatabase: settings.adxDefaultDatabase,
+        publicDatabase: settings.adxPublicDatabase,
+      },
+    };
+  });
+  app.get("/v1/knowledge/adx/databases", async (_request, reply) => {
+    try { return { databases: await coordinator.listAdxDatabases() }; }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "ADX database discovery failed." }); }
+  });
+  app.get<{ Params: { scope: string }; Querystring: { status?: string } }>("/v1/knowledge/:scope/proposals", async (request, reply) => {
+    if (!knowledgeScopes.includes(request.params.scope as KnowledgeScope)) return reply.code(400).send({ error: "Knowledge scope must be client or public." });
+    const status = request.query.status ?? "pending";
+    if (!knowledgeProposalStatuses.includes(status as KnowledgeProposal["status"] | "all")) return reply.code(400).send({ error: "Invalid knowledge proposal status." });
+    try { return { proposals: coordinator.listKnowledgeProposals(request.params.scope as KnowledgeScope, status as KnowledgeProposal["status"] | "all") }; }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Knowledge proposals are unavailable." }); }
+  });
+  app.post<{ Params: { scope: string }; Body: { operation?: string; sourcePath?: string; title?: string; content?: string; evidenceSessionId?: string } }>("/v1/knowledge/:scope/proposals", async (request, reply) => {
+    if (!knowledgeScopes.includes(request.params.scope as KnowledgeScope)) return reply.code(400).send({ error: "Knowledge scope must be client or public." });
+    if (!request.body.operation || !knowledgeProposalOperations.includes(request.body.operation as KnowledgeProposalOperation)) return reply.code(400).send({ error: "Knowledge operation must be upsert or retire." });
+    if (!request.body.sourcePath?.trim()) return reply.code(400).send({ error: "Knowledge sourcePath is required." });
+    if (request.body.operation === "upsert" && (!request.body.title?.trim() || !request.body.content?.trim())) return reply.code(400).send({ error: "Knowledge upserts require title and content." });
+    if ((request.body.content?.length ?? 0) > 200_000) return reply.code(400).send({ error: "Knowledge proposal content exceeds 200000 characters." });
+    try {
+      return { proposal: await coordinator.createKnowledgeProposal(request.params.scope as KnowledgeScope, {
+        operation: request.body.operation as KnowledgeProposalOperation,
+        sourcePath: request.body.sourcePath,
+        title: request.body.title,
+        content: request.body.content,
+        evidenceSessionId: request.body.evidenceSessionId,
+      }) };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Knowledge proposal creation failed." });
+    }
+  });
+  app.post<{ Params: { scope: string; proposalId: string; decision: string } }>("/v1/knowledge/:scope/proposals/:proposalId/:decision", async (request, reply) => {
+    if (!knowledgeScopes.includes(request.params.scope as KnowledgeScope)) return reply.code(400).send({ error: "Knowledge scope must be client or public." });
+    if (request.params.decision !== "approve" && request.params.decision !== "reject") return reply.code(400).send({ error: "Knowledge proposal decision must be approve or reject." });
+    try { return { proposal: await coordinator.reviewKnowledgeProposal(request.params.scope as KnowledgeScope, request.params.proposalId, request.params.decision) }; }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Knowledge proposal review failed." }); }
+  });
+  app.get<{ Params: { scope: string } }>("/v1/knowledge/:scope/export", async (request, reply) => {
+    if (!knowledgeScopes.includes(request.params.scope as KnowledgeScope)) return reply.code(400).send({ error: "Knowledge scope must be client or public." });
+    try { return { snapshot: coordinator.exportKnowledge(request.params.scope as KnowledgeScope) }; }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Knowledge export failed." }); }
+  });
+  app.post<{ Params: { scope: string }; Body: { snapshot?: KnowledgeSnapshot } }>("/v1/knowledge/:scope/import", { bodyLimit: 20 * 1024 * 1024 }, async (request, reply) => {
+    if (!knowledgeScopes.includes(request.params.scope as KnowledgeScope)) return reply.code(400).send({ error: "Knowledge scope must be client or public." });
+    if (!request.body.snapshot || typeof request.body.snapshot !== "object") return reply.code(400).send({ error: "A knowledge snapshot is required." });
+    try { return { result: await coordinator.importKnowledge(request.params.scope as KnowledgeScope, request.body.snapshot) }; }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Knowledge import failed." }); }
+  });
+  app.post<{ Params: { scope: string }; Body: { direction?: string } }>("/v1/knowledge/:scope/sync", async (request, reply) => {
+    if (!knowledgeScopes.includes(request.params.scope as KnowledgeScope)) return reply.code(400).send({ error: "Knowledge scope must be client or public." });
+    if (request.body.direction !== "pull" && request.body.direction !== "push") return reply.code(400).send({ error: "Knowledge sync direction must be pull or push." });
+    try {
+      const result = request.body.direction === "pull"
+        ? await coordinator.pullKnowledge(request.params.scope as KnowledgeScope)
+        : await coordinator.pushKnowledge(request.params.scope as KnowledgeScope);
+      return { result };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Knowledge synchronization failed." });
+    }
+  });
   app.get("/v1/sessions", async () => ({ sessions: coordinator.listSessions(), activeSession: coordinator.activeSessionInfo() }));
   app.post<{ Body: { title?: string } }>("/v1/sessions", async (request, reply) => {
     try { return { session: await coordinator.createSession(request.body) }; }
@@ -122,7 +206,7 @@ export function buildServer() {
   });
   app.post("/v1/meeting-summary", async () => {
     const result = await coordinator.summarizeMeeting();
-    return { summary: result.text, path: result.path };
+    return { summary: result.text, path: result.path, proposal: result.proposal };
   });
   app.get("/v1/state", async () => ({ ...coordinator.state(), activeSession: coordinator.activeSessionInfo() }));
   app.post<{ Body: { mode?: ResponseMode } }>("/v1/mode", async (request, reply) => {

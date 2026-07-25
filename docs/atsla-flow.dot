@@ -7,8 +7,10 @@ digraph ATSLA {
   audio [label="PipeWire audio bridge\nconference capture + agent mic", fillcolor="#dcecf0"];
   whisper [label="Local Whisper\nremote transcript", fillcolor="#dcecf0"];
   operator [label="ATSLA operator console\nclient, mode, approval, takeover", fillcolor="#dce8c9"];
-  guardrails [label="Global guardrails\n+ client CONTEXT-GUARDRAILS.md", fillcolor="#f7e1d7", color="#b84f2f"];
-  context [label="Explicitly loaded context\ncontext-drop, knowledge, skills", fillcolor="#f7e1d7", color="#b84f2f"];
+  guardrails [label="Public guardrails\n+ client CONTEXT-GUARDRAILS.md", fillcolor="#f7e1d7", color="#b84f2f"];
+  context [label="Scoped SQLite recall\npublic DB + active client DB", fillcolor="#f7e1d7", color="#b84f2f"];
+  adx [label="Optional Azure Data Explorer\nadmin-routed portable snapshots", fillcolor="#dcecf0", color="#285a66"];
+  proposals [label="Reviewed knowledge proposals\nversioned approve / reject", fillcolor="#fffdf8", color="#b84f2f"];
   reasoning [label="Local Qwen or isolated\nCopilot ACP reasoning", fillcolor="#dce8c9"];
   voice [label="AppaTalks voice\nprewarmed greeting cache", fillcolor="#dce8c9"];
 
@@ -16,6 +18,9 @@ digraph ATSLA {
   operator -> reasoning [label=" approved / autonomous "];
   guardrails -> reasoning;
   context -> reasoning;
+  operator -> proposals [label=" reviews "];
+  proposals -> context [label=" approved versions "];
+  adx -> context [dir=both, label=" pull / push "];
   reasoning -> voice -> audio;
   operator -> guardrails [style=dashed, label=" selects client "];
   operator -> context [style=dashed, label=" Load context "];

@@ -102,6 +102,7 @@ export interface EscalationRequest {
 export interface MeetingSession {
   id: string;
   title: string;
+  clientId: string;
   clientWorkspace: string;
   createdAt: string;
   updatedAt: string;
@@ -115,6 +116,7 @@ export interface MeetingSession {
 export interface MeetingSessionSummary {
   id: string;
   title: string;
+  clientId: string;
   clientWorkspace: string;
   createdAt: string;
   updatedAt: string;

@@ -16,6 +16,8 @@ describe("installation entry points", () => {
     expect(installer).toContain('[[ "$INSTALL_VOICE" == "true" ]] || return 0');
     expect(installer).toContain('node "$electron_dir/install.js"');
     expect(installer).toContain('npm install --include=dev');
+    expect(installer).toContain("ATSLA requires Node.js 24 or newer");
+    expect(installer).toContain('require("node:sqlite")');
     expect(installer).not.toContain("gh repo clone appatalks/voice_clone_module");
     expect(existsSync(`${root}/vendor/voice_clone_module/pyproject.toml`)).toBe(true);
     expect(existsSync(`${root}/assets/voices/appatalks-voice.wav`)).toBe(true);

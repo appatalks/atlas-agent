@@ -14,6 +14,10 @@ describe("HTTP control plane", () => {
     process.env.VOICE_BRIDGE_SESSIONS_PATH = join(testRoot, "sessions");
     process.env.VOICE_BRIDGE_CLIENTS_ROOT = join(testRoot, "clients");
     process.env.VOICE_BRIDGE_GLOBAL_KNOWLEDGE_PATH = join(testRoot, "global");
+    process.env.ATSLA_KNOWLEDGE_BACKEND = "sqlite";
+    delete process.env.ATSLA_ADX_CLUSTER_URL;
+    delete process.env.ATSLA_ADX_DEFAULT_DATABASE;
+    delete process.env.ATSLA_ADX_PUBLIC_DATABASE;
   });
 
   afterEach(async () => {
@@ -24,6 +28,7 @@ describe("HTTP control plane", () => {
     delete process.env.VOICE_BRIDGE_GLOBAL_KNOWLEDGE_PATH;
     delete process.env.VOICE_BRIDGE_PROVIDER;
     delete process.env.LOCAL_VOICE_BRIDGE_URL;
+    delete process.env.ATSLA_KNOWLEDGE_BACKEND;
     rmSync(testRoot, { recursive: true, force: true });
   });
 
@@ -90,6 +95,17 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain("session-rename-input");
     expect(dashboard.body).not.toContain("window.prompt('Rename session'");
     expect(dashboard.body).toContain("Writing meeting summary...");
+    expect(dashboard.body).toContain("Pending knowledge proposals");
+    expect(dashboard.body).toContain("/v1/knowledge/");
+    expect(dashboard.body).toContain('id="knowledgeBackend"');
+    expect(dashboard.body).toContain('id="adxClusterUrl"');
+    expect(dashboard.body).toContain("Device code (personal account)");
+    expect(dashboard.body).toContain('id="discoverAdxDatabases"');
+    expect(dashboard.body).toContain('id="clientKnowledgeDatabase"');
+    expect(dashboard.body).toContain('id="exportClientKnowledge"');
+    expect(dashboard.body).toContain('id="knowledgeImportFile"');
+    expect(dashboard.body).toContain("setInterval(refresh,3000)");
+    expect(dashboard.body).toContain("Synced with ");
     const scriptStart = dashboard.body.indexOf("<script>");
     const scriptEnd = dashboard.body.lastIndexOf("</script>");
     const script = scriptStart >= 0 && scriptEnd > scriptStart
@@ -146,7 +162,8 @@ describe("HTTP control plane", () => {
     const server = buildServer();
     servers.push(server);
     const selected = (await server.inject({ method: "POST", url: "/v1/client-workspace", payload: { name: "Context Client" } })).json();
-    expect(selected.clientWorkspace).toContain("Context-Client");
+    expect(selected).toMatchObject({ clientWorkspace: "", activeClientId: expect.stringMatching(/^client-/) });
+    expect(selected.clients).toMatchObject([{ name: "Context Client", supplementaryContextPath: "" }]);
     expect((await server.inject({ method: "GET", url: "/v1/context/status" })).json().client.loaded).toBe(false);
 
     const loaded = await server.inject({ method: "POST", url: "/v1/context/load" });
@@ -155,5 +172,68 @@ describe("HTTP control plane", () => {
 
     const cleared = await server.inject({ method: "POST", url: "/v1/context/clear" });
     expect(cleared.json()).toMatchObject({ loaded: false, path: "", files: 0 });
+  });
+
+  it("keeps proposed knowledge out of recall until scoped operator approval", async () => {
+    const server = buildServer();
+    servers.push(server);
+    await server.inject({ method: "POST", url: "/v1/client-workspace", payload: { name: "Proposal Client" } });
+    await server.inject({ method: "POST", url: "/v1/context/load" });
+
+    const created = await server.inject({
+      method: "POST",
+      url: "/v1/knowledge/client/proposals",
+      payload: {
+        operation: "upsert",
+        sourcePath: "ai/operator-approved.md",
+        title: "Approved fact",
+        content: "HTTP_PROPOSAL_CANARY",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const proposal = created.json().proposal;
+    expect(proposal).toMatchObject({ scope: "client", status: "pending" });
+    expect((await server.inject({ method: "GET", url: "/v1/knowledge/client/proposals" })).json().proposals).toMatchObject([{ id: proposal.id }]);
+
+    const before = await server.inject({ method: "POST", url: "/v1/drafts", payload: { question: "What approved fact is available?" } });
+    expect(before.json().draft.reply.text).not.toContain("HTTP_PROPOSAL_CANARY");
+    expect((await server.inject({ method: "POST", url: `/v1/knowledge/client/proposals/${proposal.id}/approve` })).json().proposal.status).toBe("approved");
+    const after = await server.inject({ method: "POST", url: "/v1/drafts", payload: { question: "What approved fact is available?" } });
+    expect(after.json().draft.reply.text).toContain("HTTP_PROPOSAL_CANARY");
+
+    await server.inject({ method: "POST", url: "/v1/client-workspace", payload: { name: "Other Proposal Client" } });
+    await server.inject({ method: "POST", url: "/v1/context/load" });
+    expect((await server.inject({ method: "GET", url: "/v1/knowledge/client/proposals" })).json().proposals).toEqual([]);
+    const crossClientReview = await server.inject({ method: "POST", url: `/v1/knowledge/client/proposals/${proposal.id}/approve` });
+    expect(crossClientReview.statusCode).toBe(400);
+    expect(crossClientReview.json().error).toContain("not found");
+  });
+
+  it("exports and imports only the selected stable client scope", async () => {
+    const server = buildServer();
+    servers.push(server);
+    await server.inject({ method: "POST", url: "/v1/client-workspace", payload: { name: "Portable Client A" } });
+    await server.inject({ method: "POST", url: "/v1/context/load" });
+    const routeA = (await server.inject({ method: "GET", url: "/v1/client-workspace/knowledge-route" })).json().route;
+    expect(routeA.clientId).toMatch(/^client-/);
+    const mapped = await server.inject({ method: "PUT", url: "/v1/client-workspace/knowledge-route", payload: { database: "client-database" } });
+    expect(mapped.json().route).toMatchObject({ clientId: routeA.clientId, knowledgeDatabase: "client-database" });
+    await server.inject({ method: "POST", url: "/v1/context/load" });
+
+    const exported = await server.inject({ method: "GET", url: "/v1/knowledge/client/export" });
+    expect(exported.statusCode).toBe(200);
+    expect(exported.json().snapshot).toMatchObject({ format: "atsla-knowledge-snapshot", scope: "client", scopeId: routeA.clientId });
+    const sameClientImport = await server.inject({ method: "POST", url: "/v1/knowledge/client/import", payload: { snapshot: exported.json().snapshot } });
+    expect(sameClientImport.statusCode).toBe(200);
+
+    await server.inject({ method: "POST", url: "/v1/client-workspace", payload: { name: "Portable Client B" } });
+    await server.inject({ method: "POST", url: "/v1/context/load" });
+    const crossClientImport = await server.inject({ method: "POST", url: "/v1/knowledge/client/import", payload: { snapshot: exported.json().snapshot } });
+    expect(crossClientImport.statusCode).toBe(400);
+    expect(crossClientImport.json().error).toContain("does not match selected scope");
+
+    const backend = (await server.inject({ method: "GET", url: "/v1/knowledge/backend" })).json();
+    expect(backend).toMatchObject({ backend: "sqlite", adx: { configured: false, authMode: "azure-cli" } });
+    expect(JSON.stringify(backend)).not.toMatch(/secret|token/i);
   });
 });

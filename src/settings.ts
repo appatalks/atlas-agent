@@ -1,10 +1,17 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { type ResponseMode } from "./domain.js";
+import { parseAdxPortalTarget, validateAdxDatabaseName, type AdxAuthMode } from "./adx-knowledge.js";
+import { KnowledgeBackendCoordinator, type AdxRepositoryFactory, type KnowledgeBackendConfig, type KnowledgeBackendKind, type KnowledgeSyncResult } from "./knowledge-backend.js";
+import { SqliteKnowledgeStore, type CreateKnowledgeProposal, type KnowledgeDocumentInput, type KnowledgePolicyInput, type KnowledgeProposal, type KnowledgeScope, type KnowledgeSnapshot } from "./knowledge-store.js";
 
 const CLIENT_GUARDRAILS_FILE = "CONTEXT-GUARDRAILS.md";
 const GLOBAL_GUARDRAILS_FILE = "GLOBAL-GUARDRAILS.md";
+const KNOWLEDGE_DATA_FOLDER = ".atsla";
+const CLIENT_DATABASE_FILE = "client-knowledge.sqlite";
+const PUBLIC_DATABASE_FILE = "public-knowledge.sqlite";
 
 export interface AgentProfile {
   id: string;
@@ -35,9 +42,16 @@ export interface VoiceBridgeSettings {
   voiceProfile: string;
   voiceProfiles: VoiceProfile[];
   activeProfileId: string;
+  activeClientId: string;
+  clients: ClientConfiguration[];
   clientWorkspace: string;
   globalKnowledgePath: string;
   globalKnowledgeEnabled: boolean;
+  knowledgeBackend: KnowledgeBackendKind;
+  adxClusterUrl: string;
+  adxAuthMode: AdxAuthMode;
+  adxDefaultDatabase: string;
+  adxPublicDatabase: string;
   retainSessionLearnings: boolean;
   saveMeetingLog: boolean;
   summarizeMeeting: boolean;
@@ -46,7 +60,26 @@ export interface VoiceBridgeSettings {
   recentClientWorkspaces: string[];
 }
 
+export interface ClientConfiguration {
+  id: string;
+  name: string;
+  knowledgeDatabase: string;
+  supplementaryContextPath: string;
+}
+
 export type AppearanceTheme = "atsla" | "atelier" | "lcars" | "terminal" | "dark";
+
+interface ClientProfileRecord extends Record<string, unknown> {
+  id: string;
+  name: string;
+  knowledgeDatabase?: string;
+}
+
+export interface KnowledgeLoadResult extends KnowledgeSyncResult {
+  files: number;
+  databasePath: string;
+  scopeId: string;
+}
 
 const defaultProfiles: AgentProfile[] = [
   { id: "support", name: "AppaTalks Support Partner", tone: "calm and practical", voiceStyle: "clear and warm", instructions: "You are AppaTalks. ATSLA means AppaTalks Support Live Agent. Prioritize accurate troubleshooting, next steps, and concise summaries." },
@@ -74,8 +107,13 @@ const defaultVoiceProfiles: VoiceProfile[] = [
 ];
 
 export function defaultSettings(): VoiceBridgeSettings {
+  const adxTarget = normalizeAdxTarget(
+    process.env.ATSLA_ADX_CLUSTER_URL ?? "",
+    process.env.ATSLA_ADX_DEFAULT_DATABASE ?? "",
+    false,
+  );
   return {
-    settingsVersion: 9,
+    settingsVersion: 11,
     appearanceTheme: "atsla",
     glassTransparency: 88,
     responseMode: "autonomous",
@@ -87,9 +125,16 @@ export function defaultSettings(): VoiceBridgeSettings {
     voiceProfile: "AppaTalks",
     voiceProfiles: defaultVoiceProfiles.map((profile) => ({ ...profile })),
     activeProfileId: "support",
+    activeClientId: "",
+    clients: [],
     clientWorkspace: "",
     globalKnowledgePath: process.env.VOICE_BRIDGE_GLOBAL_KNOWLEDGE_PATH ?? join(homedir(), "Documents", "Voice Bridge Knowledge"),
     globalKnowledgeEnabled: true,
+    knowledgeBackend: process.env.ATSLA_KNOWLEDGE_BACKEND === "adx" ? "adx" : "sqlite",
+    adxClusterUrl: adxTarget.clusterUrl,
+    adxAuthMode: isAdxAuthMode(process.env.ATSLA_ADX_AUTH_MODE) ? process.env.ATSLA_ADX_AUTH_MODE : "azure-cli",
+    adxDefaultDatabase: adxTarget.defaultDatabase,
+    adxPublicDatabase: process.env.ATSLA_ADX_PUBLIC_DATABASE ?? "",
     retainSessionLearnings: true,
     saveMeetingLog: false,
     summarizeMeeting: true,
@@ -119,7 +164,17 @@ export class SettingsStore {
     const inputModel = typeof partial.inputModel === "string" ? partial.inputModel : this.value.inputModel;
     const ttsEngineUrl = typeof partial.ttsEngineUrl === "string" ? normalizeTtsEngineUrl(partial.ttsEngineUrl, this.value.ttsEngineUrl) : this.value.ttsEngineUrl;
     const modelProvider = partial.modelProvider === "copilot-acp" ? "copilot-acp" : partial.modelProvider === "local-qwen" ? "local-qwen" : this.value.modelProvider;
+    const knowledgeBackend = partial.knowledgeBackend === "adx" ? "adx" : partial.knowledgeBackend === "sqlite" ? "sqlite" : this.value.knowledgeBackend;
+    const adxAuthMode = isAdxAuthMode(partial.adxAuthMode) ? partial.adxAuthMode : this.value.adxAuthMode;
+    const normalizedAdx = normalizeAdxTarget(
+      typeof partial.adxClusterUrl === "string" ? partial.adxClusterUrl : this.value.adxClusterUrl,
+      typeof partial.adxDefaultDatabase === "string" ? partial.adxDefaultDatabase : this.value.adxDefaultDatabase,
+    );
     const activeProfileId = profiles.some((profile) => profile.id === partial.activeProfileId) ? partial.activeProfileId! : this.value.activeProfileId;
+    const clients = Array.isArray(partial.clients) ? partial.clients.map(normalizeClientConfiguration).filter(uniqueClient) : this.value.clients;
+    const requestedActiveClientId = typeof partial.activeClientId === "string" ? partial.activeClientId : this.value.activeClientId;
+    const activeClientId = clients.some((client) => client.id === requestedActiveClientId) ? requestedActiveClientId : clients[0]?.id ?? "";
+    const activeClient = clients.find((client) => client.id === activeClientId);
     this.value = {
       ...this.value,
       ...partial,
@@ -128,9 +183,17 @@ export class SettingsStore {
       glassTransparency: clampTransparency(partial.glassTransparency ?? this.value.glassTransparency),
       defaultInputMode,
       modelProvider,
+      knowledgeBackend,
+      adxClusterUrl: normalizedAdx.clusterUrl,
+      adxAuthMode,
+      adxDefaultDatabase: normalizedAdx.defaultDatabase,
+      adxPublicDatabase: typeof partial.adxPublicDatabase === "string" ? partial.adxPublicDatabase.trim().slice(0, 128) : this.value.adxPublicDatabase,
       inputModel,
       ttsEngineUrl,
       activeProfileId,
+      activeClientId,
+      clients,
+      clientWorkspace: activeClient?.supplementaryContextPath ?? (typeof partial.clientWorkspace === "string" ? partial.clientWorkspace : this.value.clientWorkspace),
       profiles,
       voiceProfiles,
       recentClientWorkspaces: Array.isArray(partial.recentClientWorkspaces) ? partial.recentClientWorkspaces.filter((folder) => typeof folder === "string").slice(0, 12) : this.value.recentClientWorkspaces,
@@ -145,11 +208,11 @@ export class SettingsStore {
       const stored = JSON.parse(readFileSync(this.settingsPath, "utf8")) as Partial<VoiceBridgeSettings>;
       const preV5 = !stored.settingsVersion || stored.settingsVersion < 5;
       const requiresAppaTalksMigration = isLegacyDefaultVoiceSelection(stored.voiceProfile) || stored.voiceProfiles?.some(isLegacyDefaultVoiceProfile);
-      const requiresMigration = stored.settingsVersion !== 9 || requiresAppaTalksMigration;
+      const requiresMigration = stored.settingsVersion !== 11 || requiresAppaTalksMigration;
       const migrated = requiresMigration
         ? {
           ...stored,
-          settingsVersion: 9,
+          settingsVersion: 11,
           ...(stored.appearanceTheme === "atelier" ? { appearanceTheme: "atsla" as const } : {}),
           ...(preV5 ? { responseMode: "autonomous" as const, defaultInputMode: "agent" as const } : {}),
         }
@@ -164,14 +227,25 @@ export class SettingsStore {
         }
       }
       const defaults = defaultSettings();
+      const normalizedAdx = normalizeAdxTarget(migrated.adxClusterUrl ?? defaults.adxClusterUrl, migrated.adxDefaultDatabase ?? defaults.adxDefaultDatabase, false);
       const value: VoiceBridgeSettings = {
         ...defaults,
         ...migrated,
         ttsEngineUrl: normalizeTtsEngineUrl(migrated.ttsEngineUrl, defaults.ttsEngineUrl),
         voiceProfile: isLegacyDefaultVoiceSelection(migrated.voiceProfile) ? "AppaTalks" : migrated.voiceProfile ?? "AppaTalks",
+        knowledgeBackend: migrated.knowledgeBackend === "adx" ? "adx" : migrated.knowledgeBackend === "sqlite" ? "sqlite" : defaults.knowledgeBackend,
+        adxClusterUrl: normalizedAdx.clusterUrl,
+        adxAuthMode: isAdxAuthMode(migrated.adxAuthMode) ? migrated.adxAuthMode : defaults.adxAuthMode,
+        adxDefaultDatabase: normalizedAdx.defaultDatabase,
+        adxPublicDatabase: typeof migrated.adxPublicDatabase === "string" ? migrated.adxPublicDatabase.trim().slice(0, 128) : defaults.adxPublicDatabase,
+        clients: Array.isArray(migrated.clients) ? migrated.clients.map(normalizeClientConfiguration).filter(uniqueClient) : [],
+        activeClientId: typeof migrated.activeClientId === "string" ? migrated.activeClientId : "",
         profiles: (migrated.profiles?.length ? migrated.profiles : defaultProfiles).map(normalizeProfile).map(migrateAppaTalksAgentProfile),
         voiceProfiles,
       };
+      if (!value.clients.some((client) => client.id === value.activeClientId)) value.activeClientId = value.clients[0]?.id ?? "";
+      const activeClient = value.clients.find((client) => client.id === value.activeClientId);
+      if (activeClient) value.clientWorkspace = activeClient.supplementaryContextPath;
       if (requiresMigration) {
         mkdirSync(resolve(this.settingsPath, ".."), { recursive: true });
         writeFileSync(this.settingsPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -189,7 +263,76 @@ export class SettingsStore {
 }
 
 export class ClientWorkspace {
-  constructor(private readonly defaultRoot = process.env.VOICE_BRIDGE_CLIENTS_ROOT ?? join(homedir(), "Documents", "Voice Bridge Clients")) {}
+  constructor(
+    private readonly defaultRoot = process.env.VOICE_BRIDGE_CLIENTS_ROOT ?? join(homedir(), "Documents", "Voice Bridge Clients"),
+    private readonly adxRepositoryFactory?: AdxRepositoryFactory,
+    private readonly knowledgeCacheRoot = process.env.ATSLA_KNOWLEDGE_CACHE_ROOT ?? join(defaultRoot, ".atsla-cache"),
+  ) {
+    mkdirSync(this.knowledgeCacheRoot, { recursive: true });
+  }
+
+  async loadClient(client: ClientConfiguration, config: KnowledgeBackendConfig = localKnowledgeBackendConfig()): Promise<KnowledgeLoadResult> {
+    const normalized = normalizeClientConfiguration(client);
+    const folder = normalized.supplementaryContextPath ? this.select({ path: normalized.supplementaryContextPath }) : "";
+    if (folder) this.writeSupplementaryProfile(folder, normalized);
+    const files = folder ? this.clientContextFiles(folder) : [];
+    const policyFile = folder ? join(folder, "context-drop", CLIENT_GUARDRAILS_FILE) : "";
+    return this.synchronizeKnowledge(
+      config,
+      "client",
+      normalized.id,
+      this.clientCachePath(normalized.id),
+      folder,
+      policyFile ? files.filter((file) => file !== policyFile) : [],
+      policyFile ? [policyFile] : [],
+      normalized.knowledgeDatabase,
+      [normalized.name],
+      Boolean(folder),
+    );
+  }
+
+  contextForClient(clientId: string, query = ""): string {
+    return this.recall("client", this.clientCachePath(clientId), query, 16_000);
+  }
+
+  guardrailsForClient(clientId: string): string {
+    return this.readPolicies("client", this.clientCachePath(clientId));
+  }
+
+  clientStats(clientId: string): { files: number; characters: number } {
+    return this.databaseStats("client", this.clientCachePath(clientId));
+  }
+
+  createClientKnowledgeProposal(client: ClientConfiguration, input: CreateKnowledgeProposal, config: KnowledgeBackendConfig): Promise<KnowledgeProposal> {
+    return this.createProposalAt("client", this.clientCachePath(client.id), input, config, this.clientRoute(client));
+  }
+
+  reviewClientKnowledgeProposal(client: ClientConfiguration, proposalId: string, decision: "approve" | "reject", config: KnowledgeBackendConfig): Promise<KnowledgeProposal> {
+    return this.reviewProposalAt("client", this.clientCachePath(client.id), proposalId, decision, config, this.clientRoute(client));
+  }
+
+  listClientKnowledgeProposals(clientId: string, status: KnowledgeProposal["status"] | "all" = "pending"): KnowledgeProposal[] {
+    return this.withStorePath("client", this.clientCachePath(clientId), (store) => store.listProposals(status));
+  }
+
+  exportClientKnowledgeSnapshot(clientId: string): KnowledgeSnapshot {
+    return this.withStorePath("client", this.clientCachePath(clientId), (store) => store.exportSnapshot(clientId));
+  }
+
+  pullClientKnowledge(client: ClientConfiguration, config: KnowledgeBackendConfig): Promise<KnowledgeSyncResult> {
+    return this.withStorePathAsync("client", this.clientCachePath(client.id), (store) => this.backend(config).pull(store, this.clientRoute(client)));
+  }
+
+  pushClientKnowledge(client: ClientConfiguration, config: KnowledgeBackendConfig): Promise<KnowledgeSyncResult> {
+    return this.withStorePathAsync("client", this.clientCachePath(client.id), (store) => this.backend(config).push(store, this.clientRoute(client)));
+  }
+
+  async importClientKnowledgeSnapshot(client: ClientConfiguration, snapshot: KnowledgeSnapshot, config: KnowledgeBackendConfig): Promise<KnowledgeSyncResult> {
+    if (snapshot.scopeId !== client.id) throw new Error(`Knowledge snapshot scope '${snapshot.scopeId}' does not match selected scope '${client.id}'.`);
+    const stats = this.withStorePath("client", this.clientCachePath(client.id), (store) => store.importSnapshot(snapshot, "replace"));
+    const pushed = await this.pushClientKnowledge(client, config);
+    return { ...pushed, ...stats };
+  }
 
   select(request: { path?: string; name?: string }): string {
     const folder = request.path?.trim()
@@ -203,11 +346,12 @@ export class ClientWorkspace {
     mkdirSync(join(folder, "meetings"), { recursive: true });
     const profilePath = join(folder, "client-profile.json");
     if (!existsSync(profilePath)) {
-      writeFileSync(profilePath, `${JSON.stringify({ name: request.name?.trim() || basename(folder), createdAt: new Date().toISOString(), notes: "" }, null, 2)}\n`, "utf8");
+      writeFileSync(profilePath, `${JSON.stringify({ id: `client-${randomUUID()}`, name: request.name?.trim() || basename(folder), createdAt: new Date().toISOString(), notes: "", knowledgeDatabase: "" }, null, 2)}\n`, "utf8");
       writeFileSync(join(folder, "knowledge", "README.md"), "# Client Knowledge\n\nAdd product notes, runbooks, and account context here.\n", "utf8");
       writeFileSync(join(folder, "skills", "README.md"), "# Agent Skills\n\nAdd client-specific procedures and escalation rules here.\n", "utf8");
       writeFileSync(join(folder, "learnings", "README.md"), "# Session Learnings\n\nObserved client facts from sessions are retained here. Review before promoting them to authoritative knowledge.\n", "utf8");
     }
+    this.ensureClientProfile(folder, request.name);
     const contextReadme = join(folder, "context-drop", "README.md");
     if (!existsSync(contextReadme)) writeFileSync(contextReadme, "# Bulk Context Drop\n\nDrop client reference files here. ATSLA reads `.md`, `.txt`, `.json`, `.csv`, `.yaml`, and `.yml` files after you explicitly load this client context. Maintain `CONTEXT-GUARDRAILS.md` in this folder to classify what may be discussed, what is sensitive, and what the agent must avoid.\n", "utf8");
     const clientGuardrails = join(folder, "context-drop", CLIENT_GUARDRAILS_FILE);
@@ -215,24 +359,38 @@ export class ClientWorkspace {
     return folder;
   }
 
-  context(folder: string): string {
-    if (!folder || !existsSync(folder)) return "";
-    const files = this.clientContextFiles(folder).filter((file) => basename(file) !== CLIENT_GUARDRAILS_FILE);
-    return readContextFiles(files, folder, 16_000);
+  async loadClientContext(folder: string, config: KnowledgeBackendConfig = localKnowledgeBackendConfig()): Promise<KnowledgeLoadResult> {
+    const selected = this.select({ path: folder });
+    const files = this.clientContextFiles(selected);
+    const policyFile = join(selected, "context-drop", CLIENT_GUARDRAILS_FILE);
+    const profile = this.clientProfile(selected);
+    return this.synchronizeKnowledge(
+      config,
+      "client",
+      profile.id,
+      this.clientDatabasePath(selected),
+      selected,
+      files.filter((file) => file !== policyFile),
+      [policyFile],
+      profile.knowledgeDatabase,
+      [profile.name, basename(selected)],
+    );
+  }
+
+  context(folder: string, query = ""): string {
+    return this.recall("client", this.clientDatabasePath(folder), query, 16_000);
   }
 
   clientGuardrails(folder: string): string {
-    return readContextFiles([join(folder, "context-drop", CLIENT_GUARDRAILS_FILE)], folder, 8_000);
+    return this.readPolicies("client", this.clientDatabasePath(folder));
   }
 
-  globalContext(folder: string): string {
-    if (!folder || !existsSync(folder)) return "";
-    const files = walk(folder).filter((file) => isContextFile(file) && basename(file) !== GLOBAL_GUARDRAILS_FILE);
-    return readContextFiles(files, folder, 20_000);
+  globalContext(folder: string, query = ""): string {
+    return this.recall("public", this.publicDatabasePath(folder), query, 20_000);
   }
 
   globalGuardrails(folder: string): string {
-    return readContextFiles([join(folder, GLOBAL_GUARDRAILS_FILE)], folder, 8_000);
+    return this.readPolicies("public", this.publicDatabasePath(folder));
   }
 
   prepareGlobalKnowledge(folder: string): string {
@@ -248,17 +406,76 @@ export class ClientWorkspace {
     return resolved;
   }
 
+  async loadGlobalKnowledge(folder: string, config: KnowledgeBackendConfig = localKnowledgeBackendConfig()): Promise<KnowledgeLoadResult> {
+    const resolved = this.prepareGlobalKnowledge(folder);
+    const policyFile = join(resolved, GLOBAL_GUARDRAILS_FILE);
+    const files = walk(resolved).filter((file) => isContextFile(file) && file !== policyFile);
+    return this.synchronizeKnowledge(config, "public", "public-knowledge", this.publicDatabasePath(resolved), resolved, files, [policyFile], config.adxPublicDatabase, ["public", "shared-public-knowledge"]);
+  }
+
   contextStats(folder: string): { files: number; characters: number } {
-    if (!folder || !existsSync(folder)) return { files: 0, characters: 0 };
-    const context = [this.clientGuardrails(folder), this.context(folder)].filter(Boolean).join("\n");
-    const files = this.clientContextFiles(folder);
-    return { files: files.length, characters: context.length };
+    return this.databaseStats("client", this.clientDatabasePath(folder));
   }
 
   globalStats(folder: string): { files: number; characters: number } {
-    if (!folder || !existsSync(folder)) return { files: 0, characters: 0 };
-    const files = walk(folder).filter(isContextFile);
-    return { files: files.length, characters: [this.globalGuardrails(folder), this.globalContext(folder)].filter(Boolean).join("\n").length };
+    return this.databaseStats("public", this.publicDatabasePath(folder));
+  }
+
+  async createKnowledgeProposal(scope: KnowledgeScope, folder: string, input: CreateKnowledgeProposal, config: KnowledgeBackendConfig = localKnowledgeBackendConfig()): Promise<KnowledgeProposal> {
+    const proposal = this.withKnowledgeStore(scope, folder, (store) => store.createProposal(input));
+    await this.pushKnowledge(scope, folder, config);
+    return proposal;
+  }
+
+  listKnowledgeProposals(scope: KnowledgeScope, folder: string, status: KnowledgeProposal["status"] | "all" = "pending"): KnowledgeProposal[] {
+    return this.withKnowledgeStore(scope, folder, (store) => store.listProposals(status));
+  }
+
+  async reviewKnowledgeProposal(scope: KnowledgeScope, folder: string, proposalId: string, decision: "approve" | "reject", config: KnowledgeBackendConfig = localKnowledgeBackendConfig()): Promise<KnowledgeProposal> {
+    const proposal = this.withKnowledgeStore(scope, folder, (store) => store.reviewProposal(proposalId, decision));
+    await this.pushKnowledge(scope, folder, config);
+    return proposal;
+  }
+
+  exportKnowledgeSnapshot(scope: KnowledgeScope, folder: string): KnowledgeSnapshot {
+    const route = this.knowledgeRoute(scope, folder);
+    return this.withKnowledgeStore(scope, folder, (store) => store.exportSnapshot(route.scopeId));
+  }
+
+  async importKnowledgeSnapshot(scope: KnowledgeScope, folder: string, snapshot: KnowledgeSnapshot, config: KnowledgeBackendConfig = localKnowledgeBackendConfig()): Promise<KnowledgeSyncResult> {
+    const route = this.knowledgeRoute(scope, folder);
+    if (snapshot.scopeId !== route.scopeId) throw new Error(`Knowledge snapshot scope '${snapshot.scopeId}' does not match selected scope '${route.scopeId}'.`);
+    const stats = this.withKnowledgeStore(scope, folder, (store) => store.importSnapshot(snapshot, "replace"));
+    const pushed = await this.pushKnowledge(scope, folder, config);
+    return { ...pushed, ...stats };
+  }
+
+  async pullKnowledge(scope: KnowledgeScope, folder: string, config: KnowledgeBackendConfig): Promise<KnowledgeSyncResult> {
+    const route = this.knowledgeRoute(scope, folder);
+    return this.withKnowledgeStoreAsync(scope, folder, (store) => this.backend(config).pull(store, route));
+  }
+
+  async pushKnowledge(scope: KnowledgeScope, folder: string, config: KnowledgeBackendConfig): Promise<KnowledgeSyncResult> {
+    const route = this.knowledgeRoute(scope, folder);
+    return this.withKnowledgeStoreAsync(scope, folder, (store) => this.backend(config).push(store, route));
+  }
+
+  listAdxDatabases(config: KnowledgeBackendConfig): Promise<string[]> {
+    return this.backend(config).listAdxDatabases();
+  }
+
+  clientKnowledgeIdentity(folder: string): { clientId: string; name: string; knowledgeDatabase: string } {
+    const profile = this.clientProfile(folder);
+    return { clientId: profile.id, name: profile.name, knowledgeDatabase: profile.knowledgeDatabase?.trim() ?? "" };
+  }
+
+  setClientKnowledgeDatabase(folder: string, database: string): { clientId: string; name: string; knowledgeDatabase: string } {
+    const selected = this.select({ path: folder });
+    const profilePath = join(selected, "client-profile.json");
+    const profile = this.clientProfile(selected);
+    profile.knowledgeDatabase = database.trim() ? validateAdxDatabaseName(database) : "";
+    writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`, "utf8");
+    return { clientId: profile.id, name: profile.name, knowledgeDatabase: profile.knowledgeDatabase };
   }
 
   appendLearning(folder: string, sessionId: string, line: string): string {
@@ -312,6 +529,160 @@ export class ClientWorkspace {
     return roots.flatMap((root) => existsSync(root) && statSync(root).isDirectory() ? walk(root) : existsSync(root) ? [root] : []).filter(isContextFile);
   }
 
+  private async synchronizeKnowledge(config: KnowledgeBackendConfig, scope: KnowledgeScope, scopeId: string, databasePath: string, root: string, files: string[], policyFiles: string[], explicitDatabase?: string, aliases?: string[], applyLocalSources = true): Promise<KnowledgeLoadResult> {
+    const store = new SqliteKnowledgeStore(scope, databasePath);
+    try {
+      const documents = applyLocalSources ? readKnowledgeDocuments(files, root, scope) : [];
+      const policies = applyLocalSources ? readKnowledgePolicies(policyFiles, root) : [];
+      const result = await this.backend(config).synchronize(store, { scope, scopeId, explicitDatabase, aliases }, () => applyLocalSources ? store.sync(documents, policies) : store.stats());
+      return { ...result, files: result.documents + (store.policies() ? 1 : 0), databasePath, scopeId };
+    } finally {
+      store.close();
+    }
+  }
+
+  private recall(scope: KnowledgeScope, databasePath: string, query: string, maxCharacters: number): string {
+    if (!databasePath || !existsSync(databasePath)) return "";
+    const store = new SqliteKnowledgeStore(scope, databasePath);
+    try {
+      return store.recall(query, { maxCharacters: maxCharacters - 1_000 })
+        .map((item) => `[${item.sourcePath}]\n${item.content}`)
+        .join("\n\n")
+        .slice(0, maxCharacters);
+    } finally {
+      store.close();
+    }
+  }
+
+  private readPolicies(scope: KnowledgeScope, databasePath: string): string {
+    if (!databasePath || !existsSync(databasePath)) return "";
+    const store = new SqliteKnowledgeStore(scope, databasePath);
+    try {
+      return store.policies();
+    } finally {
+      store.close();
+    }
+  }
+
+  private databaseStats(scope: KnowledgeScope, databasePath: string): { files: number; characters: number } {
+    if (!databasePath || !existsSync(databasePath)) return { files: 0, characters: 0 };
+    const store = new SqliteKnowledgeStore(scope, databasePath);
+    try {
+      const stats = store.stats();
+      return { files: stats.documents + (store.policies() ? 1 : 0), characters: stats.characters };
+    } finally {
+      store.close();
+    }
+  }
+
+  private withKnowledgeStore<T>(scope: KnowledgeScope, folder: string, action: (store: SqliteKnowledgeStore) => T): T {
+    if (!folder) throw new Error(`${scope === "client" ? "Client" : "Public knowledge"} workspace is not configured.`);
+    const databasePath = scope === "client" ? this.clientDatabasePath(folder) : this.publicDatabasePath(folder);
+    if (!existsSync(databasePath)) throw new Error(`${scope === "client" ? "Client" : "Public knowledge"} database is not loaded.`);
+    const store = new SqliteKnowledgeStore(scope, databasePath);
+    try {
+      return action(store);
+    } finally {
+      store.close();
+    }
+  }
+
+  private async withKnowledgeStoreAsync<T>(scope: KnowledgeScope, folder: string, action: (store: SqliteKnowledgeStore) => Promise<T>): Promise<T> {
+    if (!folder) throw new Error(`${scope === "client" ? "Client" : "Public knowledge"} workspace is not configured.`);
+    const databasePath = scope === "client" ? this.clientDatabasePath(folder) : this.publicDatabasePath(folder);
+    if (!existsSync(databasePath)) throw new Error(`${scope === "client" ? "Client" : "Public knowledge"} database is not loaded.`);
+    const store = new SqliteKnowledgeStore(scope, databasePath);
+    try {
+      return await action(store);
+    } finally {
+      store.close();
+    }
+  }
+
+  private withStorePath<T>(scope: KnowledgeScope, databasePath: string, action: (store: SqliteKnowledgeStore) => T): T {
+    if (!existsSync(databasePath)) throw new Error(`${scope === "client" ? "Client" : "Public knowledge"} database is not loaded.`);
+    const store = new SqliteKnowledgeStore(scope, databasePath);
+    try { return action(store); } finally { store.close(); }
+  }
+
+  private async withStorePathAsync<T>(scope: KnowledgeScope, databasePath: string, action: (store: SqliteKnowledgeStore) => Promise<T>): Promise<T> {
+    if (!existsSync(databasePath)) throw new Error(`${scope === "client" ? "Client" : "Public knowledge"} database is not loaded.`);
+    const store = new SqliteKnowledgeStore(scope, databasePath);
+    try { return await action(store); } finally { store.close(); }
+  }
+
+  private async createProposalAt(scope: KnowledgeScope, databasePath: string, input: CreateKnowledgeProposal, config: KnowledgeBackendConfig, route: { scope: KnowledgeScope; scopeId: string; explicitDatabase?: string; aliases?: string[] }): Promise<KnowledgeProposal> {
+    const proposal = this.withStorePath(scope, databasePath, (store) => store.createProposal(input));
+    await this.withStorePathAsync(scope, databasePath, (store) => this.backend(config).push(store, route));
+    return proposal;
+  }
+
+  private async reviewProposalAt(scope: KnowledgeScope, databasePath: string, proposalId: string, decision: "approve" | "reject", config: KnowledgeBackendConfig, route: { scope: KnowledgeScope; scopeId: string; explicitDatabase?: string; aliases?: string[] }): Promise<KnowledgeProposal> {
+    const proposal = this.withStorePath(scope, databasePath, (store) => store.reviewProposal(proposalId, decision));
+    await this.withStorePathAsync(scope, databasePath, (store) => this.backend(config).push(store, route));
+    return proposal;
+  }
+
+  private backend(config: KnowledgeBackendConfig): KnowledgeBackendCoordinator {
+    return new KnowledgeBackendCoordinator(config, this.adxRepositoryFactory);
+  }
+
+  private knowledgeRoute(scope: KnowledgeScope, folder: string): { scope: KnowledgeScope; scopeId: string; explicitDatabase?: string; aliases?: string[] } {
+    if (scope === "public") return { scope, scopeId: "public-knowledge", aliases: ["public", "shared-public-knowledge"] };
+    const profile = this.clientProfile(folder);
+    return { scope, scopeId: profile.id, explicitDatabase: profile.knowledgeDatabase, aliases: [profile.name, basename(folder)] };
+  }
+
+  private ensureClientProfile(folder: string, requestedName?: string): ClientProfileRecord {
+    const profilePath = join(folder, "client-profile.json");
+    let profile: Record<string, unknown> = {};
+    try { profile = JSON.parse(readFileSync(profilePath, "utf8")) as Record<string, unknown>; } catch {}
+    let changed = false;
+    if (typeof profile.id !== "string" || !/^client-[a-f0-9-]{36}$/i.test(profile.id)) {
+      profile.id = `client-${randomUUID()}`;
+      changed = true;
+    }
+    if (typeof profile.name !== "string" || !profile.name.trim()) {
+      profile.name = requestedName?.trim() || basename(folder);
+      changed = true;
+    }
+    if (typeof profile.knowledgeDatabase !== "string") {
+      profile.knowledgeDatabase = "";
+      changed = true;
+    }
+    if (changed) writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`, "utf8");
+    return profile as ClientProfileRecord;
+  }
+
+  private clientProfile(folder: string): ClientProfileRecord {
+    return this.ensureClientProfile(folder);
+  }
+
+  private clientDatabasePath(folder: string): string {
+    return folder ? join(folder, KNOWLEDGE_DATA_FOLDER, CLIENT_DATABASE_FILE) : "";
+  }
+
+  private clientCachePath(clientId: string): string {
+    const safeClientId = clientId.replace(/[^a-zA-Z0-9._-]+/g, "-");
+    if (!safeClientId) throw new Error("Client ID is required for its local knowledge cache.");
+    return join(this.knowledgeCacheRoot, `${safeClientId}.sqlite`);
+  }
+
+  private clientRoute(client: ClientConfiguration): { scope: "client"; scopeId: string; explicitDatabase?: string; aliases: string[] } {
+    return { scope: "client", scopeId: client.id, explicitDatabase: client.knowledgeDatabase || undefined, aliases: [client.name] };
+  }
+
+  private writeSupplementaryProfile(folder: string, client: ClientConfiguration): void {
+    const path = join(folder, "client-profile.json");
+    let profile: Record<string, unknown> = {};
+    try { profile = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>; } catch {}
+    writeFileSync(path, `${JSON.stringify({ ...profile, id: client.id, name: client.name, knowledgeDatabase: client.knowledgeDatabase }, null, 2)}\n`, "utf8");
+  }
+
+  private publicDatabasePath(folder: string): string {
+    return folder ? join(folder, KNOWLEDGE_DATA_FOLDER, PUBLIC_DATABASE_FILE) : "";
+  }
+
   private safePath(value: string, allowApprovedRoot = false): string {
     const folder = resolve(value);
     const configuredRoot = resolve(this.defaultRoot);
@@ -325,6 +696,27 @@ export class ClientWorkspace {
 
 function normalizeProfile(profile: AgentProfile): AgentProfile {
   return { id: safeName(profile.id || profile.name || "profile"), name: profile.name.slice(0, 80), tone: profile.tone.slice(0, 240), voiceStyle: profile.voiceStyle.slice(0, 240), instructions: profile.instructions.slice(0, 4_000) };
+}
+
+function normalizeClientConfiguration(client: ClientConfiguration): ClientConfiguration {
+  const id = typeof client?.id === "string" && /^[a-zA-Z0-9._-]{3,128}$/.test(client.id.trim())
+    ? client.id.trim()
+    : `client-${randomUUID()}`;
+  const name = typeof client?.name === "string" && client.name.trim() ? client.name.trim().slice(0, 120) : id;
+  let knowledgeDatabase = "";
+  if (typeof client?.knowledgeDatabase === "string" && client.knowledgeDatabase.trim()) {
+    knowledgeDatabase = validateAdxDatabaseName(client.knowledgeDatabase);
+  }
+  return {
+    id,
+    name,
+    knowledgeDatabase,
+    supplementaryContextPath: typeof client?.supplementaryContextPath === "string" ? client.supplementaryContextPath.trim() : "",
+  };
+}
+
+function uniqueClient(client: ClientConfiguration, index: number, clients: ClientConfiguration[]): boolean {
+  return clients.findIndex((candidate) => candidate.id === client.id) === index;
 }
 
 function normalizeVoiceProfile(profile: VoiceProfile): VoiceProfile {
@@ -424,6 +816,40 @@ function isResponseMode(value: unknown): value is ResponseMode {
   return value === "disabled" || value === "suggest" || value === "approval" || value === "guarded-autonomous" || value === "autonomous";
 }
 
+function isAdxAuthMode(value: unknown): value is AdxAuthMode {
+  return value === "device-code" || value === "interactive-browser" || value === "azure-cli" || value === "managed-identity" || value === "application";
+}
+
+function normalizeAdxTarget(clusterValue: string, databaseValue: string, strict = true): { clusterUrl: string; defaultDatabase: string } {
+  const cluster = clusterValue.trim();
+  if (!cluster) return { clusterUrl: "", defaultDatabase: databaseValue.trim().slice(0, 128) };
+  try {
+    const target = parseAdxPortalTarget(cluster);
+    return { clusterUrl: target.clusterUrl, defaultDatabase: databaseValue.trim().slice(0, 128) || target.database?.slice(0, 128) || "" };
+  } catch (error) {
+    if (strict) throw error;
+    return { clusterUrl: "", defaultDatabase: databaseValue.trim().slice(0, 128) };
+  }
+}
+
+export function knowledgeBackendConfig(settings: VoiceBridgeSettings): KnowledgeBackendConfig {
+  return {
+    backend: settings.knowledgeBackend,
+    adxClusterUrl: settings.adxClusterUrl,
+    adxAuthMode: settings.adxAuthMode,
+    adxDefaultDatabase: settings.adxDefaultDatabase,
+    adxPublicDatabase: settings.adxPublicDatabase,
+  };
+}
+
+export function publicKnowledgeBackendConfig(): KnowledgeBackendConfig {
+  return localKnowledgeBackendConfig();
+}
+
+function localKnowledgeBackendConfig(): KnowledgeBackendConfig {
+  return { backend: "sqlite", adxClusterUrl: "", adxAuthMode: "azure-cli", adxDefaultDatabase: "", adxPublicDatabase: "" };
+}
+
 function isPathWithin(root: string, path: string, allowRoot: boolean): boolean {
   const pathFromRoot = relative(root, path);
   return (allowRoot || Boolean(pathFromRoot)) && !pathFromRoot.startsWith("..") && !pathFromRoot.startsWith("/");
@@ -446,17 +872,37 @@ function isContextFile(file: string): boolean {
   return [".md", ".txt", ".json", ".csv", ".yaml", ".yml"].includes(extname(file).toLowerCase());
 }
 
-function readContextFiles(files: string[], root: string, maxCharacters: number): string {
-  let result = "";
+function readKnowledgeDocuments(files: string[], root: string, scope: KnowledgeScope): KnowledgeDocumentInput[] {
+  const documents: KnowledgeDocumentInput[] = [];
   for (const file of files) {
-    if (result.length >= maxCharacters) break;
     try {
       const content = readFileSync(file, "utf8").trim();
       if (!content) continue;
-      result += `\n[${relative(root, file)}]\n${content.slice(0, 4_000)}\n`;
+      const sourcePath = relative(root, file);
+      documents.push({
+        sourcePath,
+        title: basename(file),
+        content,
+        classification: isRestrictedSource(sourcePath) ? "restricted" : scope,
+      });
     } catch {}
   }
-  return result.trim();
+  return documents;
+}
+
+function readKnowledgePolicies(files: string[], root: string): KnowledgePolicyInput[] {
+  return files.flatMap((file) => {
+    try {
+      const content = readFileSync(file, "utf8").trim();
+      return content ? [{ sourcePath: relative(root, file), content }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function isRestrictedSource(sourcePath: string): boolean {
+  return sourcePath.split(/[\\/]/).some((part) => part.toLowerCase() === "restricted") || /\.restricted\.[^.]+$/i.test(sourcePath);
 }
 
 function defaultClientGuardrails(): string {

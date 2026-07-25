@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -21,6 +21,7 @@ describe("client workspace", () => {
     expect(existsSync(join(folder, "context-drop", "README.md"))).toBe(true);
     expect(existsSync(join(folder, "context-drop", "CONTEXT-GUARDRAILS.md"))).toBe(true);
     expect(existsSync(join(folder, "meetings"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(folder, "client-profile.json"), "utf8")).id).toMatch(/^client-[a-f0-9-]{36}$/);
     const global = workspace.prepareGlobalKnowledge(join(root, "global"));
     expect(existsSync(join(global, "GLOBAL-GUARDRAILS.md"))).toBe(true);
 
@@ -54,6 +55,41 @@ describe("client workspace", () => {
     const workspace = new ClientWorkspace(root);
 
     expect(() => workspace.select({ path: "/etc/voice-bridge-client" })).toThrow("Workspace paths must be inside");
+  });
+
+  it("persists an explicit ADX route against the stable client identity", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-client-route-"));
+    folders.push(root);
+    const workspace = new ClientWorkspace(root);
+    const folder = workspace.select({ name: "Northwind Support" });
+    const before = workspace.clientKnowledgeIdentity(folder);
+    const updated = workspace.setClientKnowledgeDatabase(folder, "client-database");
+
+    expect(updated).toMatchObject({ clientId: before.clientId, name: "Northwind Support", knowledgeDatabase: "client-database" });
+    expect(new ClientWorkspace(root).clientKnowledgeIdentity(folder)).toEqual(updated);
+    expect(() => workspace.setClientKnowledgeDatabase(folder, "bad/database")).toThrow("unsupported characters");
+  });
+
+  it("imports the client and public templates into separate SQLite databases", async () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-template-import-"));
+    folders.push(root);
+    const client = join(root, "client-template");
+    const publicKnowledge = join(root, "public-template");
+    cpSync(new URL("../template-client-folder", import.meta.url), client, { recursive: true });
+    cpSync(new URL("../template-public-knowledgebase", import.meta.url), publicKnowledge, { recursive: true });
+    const workspace = new ClientWorkspace(join(root, "clients"));
+
+    const selected = workspace.select({ path: client });
+    const clientStats = await workspace.loadClientContext(selected);
+    await workspace.loadGlobalKnowledge(publicKnowledge);
+
+    expect(clientStats).toMatchObject({ documents: expect.any(Number), chunks: expect.any(Number) });
+    expect(existsSync(join(client, ".atsla", "client-knowledge.sqlite"))).toBe(true);
+    expect(existsSync(join(publicKnowledge, ".atsla", "public-knowledge.sqlite"))).toBe(true);
+    expect(workspace.context(client, "Northwind support plan")).toContain("Enterprise Demo");
+    expect(workspace.context(client, "public triage basics")).not.toContain("Public Triage Basics");
+    expect(workspace.globalContext(publicKnowledge, "public triage basics")).toContain("Public Triage Basics");
+    expect(workspace.globalContext(publicKnowledge, "Northwind support plan")).not.toContain("Enterprise Demo");
   });
 });
 
@@ -125,7 +161,7 @@ describe("default voice profile", () => {
       writeFileSync(path, JSON.stringify(legacy), "utf8");
       const migrated = new SettingsStore(path).get();
 
-      expect(migrated.settingsVersion).toBe(9);
+      expect(migrated.settingsVersion).toBe(11);
       expect(migrated.responseMode).toBe("autonomous");
       expect(migrated.defaultInputMode).toBe("agent");
     } finally {
@@ -171,6 +207,47 @@ describe("default voice profile", () => {
     }
   });
 
+  it("normalizes a Data Explorer portal link without hardcoding its endpoint", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-adx-settings-"));
+    try {
+      const path = join(root, "settings.json");
+      const store = new SettingsStore(path);
+      const updated = store.update({
+        knowledgeBackend: "adx",
+        adxClusterUrl: "https://dataexplorer.azure.com/clusters/example.southcentralus/databases/client-database",
+        adxAuthMode: "device-code",
+      });
+      expect(updated).toMatchObject({
+        settingsVersion: 11,
+        knowledgeBackend: "adx",
+        adxClusterUrl: "https://example.southcentralus.kusto.windows.net",
+        adxDefaultDatabase: "client-database",
+        adxAuthMode: "device-code",
+      });
+      expect(JSON.stringify(updated)).not.toContain("clientSecret");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes an ADX portal link supplied through environment defaults", () => {
+    const previousCluster = process.env.ATSLA_ADX_CLUSTER_URL;
+    const previousDatabase = process.env.ATSLA_ADX_DEFAULT_DATABASE;
+    try {
+      process.env.ATSLA_ADX_CLUSTER_URL = "https://dataexplorer.azure.com/clusters/example.southcentralus/databases/client-database";
+      delete process.env.ATSLA_ADX_DEFAULT_DATABASE;
+      expect(defaultSettings()).toMatchObject({
+        adxClusterUrl: "https://example.southcentralus.kusto.windows.net",
+        adxDefaultDatabase: "client-database",
+      });
+    } finally {
+      if (previousCluster === undefined) delete process.env.ATSLA_ADX_CLUSTER_URL;
+      else process.env.ATSLA_ADX_CLUSTER_URL = previousCluster;
+      if (previousDatabase === undefined) delete process.env.ATSLA_ADX_DEFAULT_DATABASE;
+      else process.env.ATSLA_ADX_DEFAULT_DATABASE = previousDatabase;
+    }
+  });
+
   it("migrates the prior default theme and adds the Eva voice profile", () => {
     const root = mkdtempSync(join(tmpdir(), "voice-bridge-atsla-theme-"));
     try {
@@ -184,7 +261,7 @@ describe("default voice profile", () => {
       writeFileSync(path, JSON.stringify(legacy), "utf8");
 
       const migrated = new SettingsStore(path).get();
-      expect(migrated).toMatchObject({ settingsVersion: 9, appearanceTheme: "atsla" });
+      expect(migrated).toMatchObject({ settingsVersion: 11, appearanceTheme: "atsla" });
       expect(migrated.voiceProfiles.find((profile) => profile.id === "eva")?.instructions).toContain("warm, curious, and genuine");
     } finally {
       rmSync(root, { recursive: true, force: true });

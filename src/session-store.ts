@@ -12,11 +12,12 @@ export class SessionStore {
     mkdirSync(this.root, { recursive: true });
   }
 
-  create(title = "New conversation", clientWorkspace = ""): MeetingSession {
+  create(title = "New conversation", clientId = "", clientWorkspace = ""): MeetingSession {
     const now = new Date().toISOString();
     const session: MeetingSession = {
       id: randomUUID(),
       title: title.trim().slice(0, 120) || "New conversation",
+      clientId,
       clientWorkspace,
       createdAt: now,
       updatedAt: now,
@@ -40,7 +41,7 @@ export class SessionStore {
   get(id: string): MeetingSession {
     const path = this.path(id);
     if (!existsSync(path)) throw new Error("Meeting session was not found.");
-    return JSON.parse(readFileSync(path, "utf8")) as MeetingSession;
+    return normalizeSession(JSON.parse(readFileSync(path, "utf8")) as Partial<MeetingSession>);
   }
 
   rename(id: string, title: string): MeetingSession {
@@ -49,19 +50,20 @@ export class SessionStore {
     return this.save({ ...this.get(id), title: cleanTitle });
   }
 
-  list(clientWorkspace: string): MeetingSessionSummary[] {
+  list(clientId: string): MeetingSessionSummary[] {
     if (!existsSync(this.root)) return [];
-    const selectedWorkspace = clientWorkspace.trim();
-    if (!selectedWorkspace) return [];
+    const selectedClientId = clientId.trim();
+    if (!selectedClientId) return [];
     return readdirSync(this.root)
       .filter(isSessionFileName)
       .flatMap((name) => {
         try {
-          const session = JSON.parse(readFileSync(this.path(name.slice(0, -5)), "utf8")) as MeetingSession;
-          if (session.clientWorkspace !== selectedWorkspace) return [];
+          const session = normalizeSession(JSON.parse(readFileSync(this.path(name.slice(0, -5)), "utf8")) as Partial<MeetingSession>);
+          if (session.clientId !== selectedClientId) return [];
           return [{
             id: session.id,
             title: session.title,
+            clientId: session.clientId,
             clientWorkspace: session.clientWorkspace,
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
@@ -85,6 +87,23 @@ export class SessionStore {
     if (!isChildPath(this.root, path)) throw new Error("Invalid session path.");
     return path;
   }
+}
+
+function normalizeSession(session: Partial<MeetingSession>): MeetingSession {
+  const clientWorkspace = typeof session.clientWorkspace === "string" ? session.clientWorkspace : "";
+  return {
+    id: String(session.id ?? ""),
+    title: String(session.title ?? "New conversation"),
+    clientId: typeof session.clientId === "string" && session.clientId ? session.clientId : clientWorkspace,
+    clientWorkspace,
+    createdAt: String(session.createdAt ?? new Date().toISOString()),
+    updatedAt: String(session.updatedAt ?? session.createdAt ?? new Date().toISOString()),
+    greetingSent: Boolean(session.greetingSent),
+    transcript: Array.isArray(session.transcript) ? session.transcript : [],
+    drafts: Array.isArray(session.drafts) ? session.drafts : [],
+    activity: Array.isArray(session.activity) ? session.activity : [],
+    escalations: Array.isArray(session.escalations) ? session.escalations : [],
+  };
 }
 
 function isChildPath(root: string, path: string): boolean {

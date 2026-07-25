@@ -2,7 +2,7 @@
 
 ![ATSLA Support Live Agent](docs/atsla-agent.png)
 
-[Technical guide](README-2.md) | [Demo client](demo-client-folder) | [Issues](https://github.com/appatalks/atsla-support-live-agent/issues)
+[Technical guide](README-2.md) | [Client template](template-client-folder) | [Public knowledge template](template-public-knowledgebase) | [Issues](https://github.com/appatalks/atsla-support-live-agent/issues)
 
 ATSLA is a local, operator-controlled AI support agent for live customer conversations. It listens to call audio, applies explicit global and client guardrails, and speaks through voice profiles when the operator authorizes or enables autonomous participation.
 
@@ -38,23 +38,25 @@ atsla
 | **Live call bridge** | PipeWire call capture, isolated agent microphone, and local operator monitoring. |
 | **AppaTalks voice** | Local voice synthesis with a prewarmed Standard Greeting. |
 | **Operator control** | Monitor, approve, autonomous, mute, takeover, and live-representative escalation controls. |
-| **Client isolation** | Separate sessions, explicit context loading, and no Copilot cross-client memory. |
+| **Client isolation** | Stable client routing to separate SQLite caches or admin-mapped ADX databases, with no model-accessible database tools. |
+| **Portable knowledge** | Versioned JSON snapshots move the same policies, documents, proposals, and history between SQLite and Azure Data Explorer. |
 | **Guardrails** | Global and per-client disclosure, sensitivity, and escalation rules take precedence over reference material. |
 | **Local reasoning** | Local Qwen or authenticated GitHub Copilot CLI reasoning. |
 
 ## Get Started
 
 1. Launch `atsla` and join the call.
-2. Select or create a client workspace.
-3. Use **Open folder** to add approved files to `context-drop/` and define `CONTEXT-GUARDRAILS.md`.
-4. Select **Load context**, then start a session. ATSLA sends the Standard Greeting once.
-5. Choose Monitor, Approve, or Autonomous mode. Use takeover whenever a person should resume the conversation.
+2. Choose Local SQLite or Azure Data Explorer in **Settings > Workspace**, then configure a durable shared public knowledge folder from [template-public-knowledgebase](template-public-knowledgebase).
+3. Select or create a database client. Client identity and sessions do not require a folder.
+4. Optionally attach a supplementary folder based on [template-client-folder](template-client-folder) for additive session context and meeting artifacts, then select **Load context**.
+5. Start a session. ATSLA sends the Standard Greeting once.
+6. Choose Monitor, Approve, or Autonomous mode. Use takeover whenever a person should resume the conversation.
 
-Try the fictional [demo-client-folder](demo-client-folder) first. Real client data belongs outside this repository.
+The committed templates are fictional import examples. Real client data and generated `.atsla/` databases belong outside this repository.
 
 ## Privacy
 
-ATSLA is an operator tool, not an unattended participant. Inform participants that an AI agent is present and obtain the required consent before capturing or retaining meeting material. Client context is opt-in and global/client guardrails are loaded before reference material.
+ATSLA is an operator tool, not an unattended participant. Inform participants that an AI agent is present and obtain the required consent before capturing or retaining meeting material. Client context is opt-in; public and client guardrails are loaded before scoped database recall.
 
 ## Supervision And Responsibility
 
