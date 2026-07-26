@@ -69,7 +69,7 @@ export function buildServer() {
   });
   app.register(cors, { origin: false });
   app.get("/", async (_request, reply) => reply.type("text/html; charset=utf-8").send(dashboard));
-  app.get("/health", async () => ({
+  app.get("/health", { config: { rateLimit: false } }, async () => ({
     ok: true,
     provider: provider.id,
     simulation: provider.id === "simulation",
@@ -212,7 +212,7 @@ export function buildServer() {
     const result = await coordinator.summarizeMeeting();
     return { summary: result.text, path: result.path, proposal: result.proposal };
   });
-  app.get("/v1/state", async () => ({ ...coordinator.state(), activeSession: coordinator.activeSessionInfo() }));
+  app.get("/v1/state", { config: { rateLimit: false } }, async () => ({ ...coordinator.state(), activeSession: coordinator.activeSessionInfo() }));
   app.post<{ Body: { mode?: ResponseMode } }>("/v1/mode", async (request, reply) => {
     if (!request.body.mode || !responseModes.includes(request.body.mode)) return reply.code(400).send({ error: "A valid response mode is required." });
     coordinator.setMode(request.body.mode);
@@ -246,7 +246,7 @@ export function buildServer() {
     try { return await coordinator.speakTemplate(request.body.text); }
     catch (error) { return reply.code(500).send({ error: error instanceof Error ? error.message : "Template speech failed." }); }
   });
-  app.get("/v1/audio/status", async () => audio.status());
+  app.get("/v1/audio/status", { config: { rateLimit: false } }, async () => audio.status());
   app.post("/v1/audio/start", async (_request, reply) => {
     try { return { output: await audio.start() }; }
     catch (error) { return reply.code(403).send({ error: error instanceof Error ? error.message : "Audio start failed." }); }

@@ -55,12 +55,18 @@ describe("HTTP control plane", () => {
     expect(authorization.json().dispatch.status).toBe("spoken");
   });
 
-  it("rate-limits repeated control-plane requests", async () => {
+  it("does not charge passive polling against the control-plane rate limit", async () => {
     const server = buildServer();
     servers.push(server);
 
-    let response = await server.inject({ method: "GET", url: "/health" });
-    for (let attempt = 0; attempt < 120; attempt += 1) response = await server.inject({ method: "GET", url: "/health" });
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      expect((await server.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
+      expect((await server.inject({ method: "GET", url: "/v1/state" })).statusCode).toBe(200);
+      expect((await server.inject({ method: "GET", url: "/v1/audio/status" })).statusCode).toBe(200);
+    }
+
+    let response = await server.inject({ method: "GET", url: "/v1/settings" });
+    for (let attempt = 0; attempt < 120; attempt += 1) response = await server.inject({ method: "GET", url: "/v1/settings" });
     expect(response.statusCode).toBe(429);
   });
 
