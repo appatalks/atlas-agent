@@ -127,7 +127,7 @@ EOF
   chmod +x "$legacy_launcher"
   if [[ "$OS" == "Linux" ]]; then
     mkdir -p "$app_dir"
-    cat > "$app_dir/atlas-live-agentic-support.desktop" <<EOF
+    cat > "$app_dir/atlas-agent.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=ATLAS | Live Agentic Support
@@ -137,11 +137,11 @@ Terminal=false
 Categories=Utility;Network;
 StartupNotify=true
 EOF
-    rm -f "$app_dir/atsla-support-live-agent.desktop" "$app_dir/atlas-live-agent-support.desktop"
+    rm -f "$app_dir/atlas-live-agentic-support.desktop" "$app_dir/atsla-support-live-agent.desktop" "$app_dir/atlas-live-agent-support.desktop"
   fi
   echo "Installed launcher: $launcher"
   echo "Installed compatibility alias: $legacy_launcher"
-  [[ "$OS" == "Linux" ]] && echo "Installed desktop entry: $app_dir/atlas-live-agentic-support.desktop"
+  [[ "$OS" == "Linux" ]] && echo "Installed desktop entry: $app_dir/atlas-agent.desktop"
 }
 
 main() {

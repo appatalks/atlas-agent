@@ -30,10 +30,10 @@ Logs default to `~/.local/state/voice-bridge/`. The supervisor owns its children
 
 ## Installation
 
-For a public release, use the bootstrap shown in [README.md](README.md). It clones ATLAS to `~/.local/share/atlas-live-agentic-support`, runs the versioned installer, creates the `atlas` launcher, and creates a Linux desktop entry.
+For a public release, use the bootstrap shown in [README.md](README.md). It clones ATLAS to `~/.local/share/atlas-agent`, runs the versioned installer, creates the `atlas` launcher, and creates a Linux desktop entry.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/appatalks/atlas-live-agentic-support/main/get-atlas.sh | bash
+curl -fsSL https://raw.githubusercontent.com/appatalks/atlas-agent/main/get-atlas.sh | bash
 atlas
 ```
 
@@ -48,9 +48,9 @@ For live Linux operation, provide Node.js 24 or newer, PipeWire/PulseAudio compa
 
 The installer supports `--skip-voice`, `--skip-whisper`, and `--no-launcher` for development or staged setup. `atlas status`, `atlas stop`, and `atlas update` manage an installed checkout.
 
-### ATSLA To ATLAS Migration
+### Repository And ATSLA Migration
 
-ATLAS means **AppaTalks Live Agentic Support**. The installer migrates the former `atsla-support-live-agent` checkout to `atlas-live-agentic-support`, installs `atlas` as the primary command, and retains `atsla` as a forwarding compatibility alias. Existing `ATSLA_*` environment variables, `.atsla` knowledge folders, `.atsla-cache` client caches, ATSLA theme/profile settings, `atsla-knowledge-snapshot` payloads, and `AtslaKnowledgeSnapshots` ADX tables remain readable. New writes use `ATLAS_*`, `.atlas`, `.atlas-cache`, `atlas-knowledge-snapshot`, and `AtlasKnowledgeSnapshots`.
+ATLAS means **AppaTalks Live Agentic Support**. The bootstrap migrates prior `atlas-live-agentic-support` and `atsla-support-live-agent` checkouts to `atlas-agent`, installs `atlas` as the primary command, and retains `atsla` as a forwarding compatibility alias. Existing `ATSLA_*` environment variables, `.atsla` knowledge folders, `.atsla-cache` client caches, ATSLA theme/profile settings, `atsla-knowledge-snapshot` payloads, and `AtslaKnowledgeSnapshots` ADX tables remain readable. New writes use `ATLAS_*`, `.atlas`, `.atlas-cache`, `atlas-knowledge-snapshot`, and `AtlasKnowledgeSnapshots`.
 
 Loading an existing ADX-backed client reads the canonical table first, falls back to the legacy table when needed, and writes the next snapshot to `AtlasKnowledgeSnapshots`. The legacy table is left intact for rollback safety.
 

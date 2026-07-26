@@ -45,7 +45,7 @@ class AcpSession:
         self.request("initialize", {
             "protocolVersion": 1,
             "clientCapabilities": {},
-            "clientInfo": {"name": "atlas-live-agentic-support", "title": "ATLAS Live Agentic Support", "version": "1.0.0"},
+            "clientInfo": {"name": "atlas-agent", "title": "ATLAS Agent", "version": "1.0.0"},
         }, timeout=30)
         session = self.request("session/new", {"cwd": str(self.cwd), "mcpServers": []}, timeout=30)
         session_id = session.get("sessionId") if isinstance(session, dict) else None

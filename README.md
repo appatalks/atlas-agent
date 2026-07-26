@@ -2,7 +2,7 @@
 
 ![ATLAS Live Agentic Support](docs/atlas-agent-splash.png)
 
-[Technical guide](README-2.md) | [Database seed](template-database-seed) | [Client template](template-client-folder) | [Public knowledge template](template-public-knowledgebase) | [Issues](https://github.com/appatalks/atlas-live-agentic-support/issues)
+[Technical guide](README-2.md) | [Database seed](template-database-seed) | [Client template](template-client-folder) | [Public knowledge template](template-public-knowledgebase) | [Issues](https://github.com/appatalks/atlas-agent/issues)
 
 ATLAS is a local, operator-controlled AI support agent for live customer conversations. It listens to call audio, starts with shared public knowledge, adds private knowledge only for the client selected by the operator, applies explicit global and client guardrails, and speaks through voice profiles when the operator authorizes or enables autonomous participation.
 
@@ -11,7 +11,7 @@ ATLAS is a local, operator-controlled AI support agent for live customer convers
 Install ATLAS with one command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/appatalks/atlas-live-agentic-support/main/get-atlas.sh | bash
+curl -fsSL https://raw.githubusercontent.com/appatalks/atlas-agent/main/get-atlas.sh | bash
 ```
 
 Then launch ATLAS:
@@ -25,8 +25,8 @@ The installer creates an `atlas` command and, on Linux, a desktop application en
 Or clone manually:
 
 ```bash
-git clone https://github.com/appatalks/atlas-live-agentic-support.git
-cd atlas-live-agentic-support
+git clone https://github.com/appatalks/atlas-agent.git
+cd atlas-agent
 bash tools/install.sh
 atlas
 ```

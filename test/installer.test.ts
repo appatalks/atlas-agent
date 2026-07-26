@@ -10,7 +10,9 @@ describe("installation entry points", () => {
     const installer = readFileSync(`${root}/tools/install.sh`, "utf8");
     const readme = readFileSync(`${root}/README.md`, "utf8");
 
-    expect(bootstrap).toContain("https://github.com/appatalks/atlas-live-agentic-support.git");
+    expect(bootstrap).toContain("https://github.com/appatalks/atlas-agent.git");
+    expect(bootstrap).toContain('/atlas-agent}');
+    expect(bootstrap).toContain("atlas-live-agentic-support");
     expect(bootstrap).toContain('exec bash "$INSTALL_DIR/tools/install.sh"');
     expect(installer).toContain('local launcher="$bin_dir/atlas"');
     expect(installer).toContain('local legacy_launcher="$bin_dir/atsla"');
@@ -21,7 +23,9 @@ describe("installation entry points", () => {
     expect(installer).toContain("repair_voice_module_link");
     expect(installer).toContain('uv pip install --python "$python" --no-deps --editable "$VOICE_MODULE_DIR"');
     expect(installer).toContain("ATLAS requires Node.js 24 or newer");
-    expect(bootstrap).toContain("Migrating ATSLA installation to ATLAS");
+    expect(bootstrap).toContain("Migrating ATLAS installation");
+    expect(installer).toContain('atlas-agent.desktop');
+    expect(installer).toContain('atlas-live-agentic-support.desktop');
     expect(readme).toContain("docs/atlas-agent-splash.png");
     expect(readme).not.toContain("docs/atlas-agent.png");
     expect(existsSync(`${root}/docs/atlas-agent-splash.png`)).toBe(true);

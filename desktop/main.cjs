@@ -11,14 +11,14 @@ let routingTimer = null;
 
 app.disableHardwareAcceleration();
 const appData = app.getPath("appData");
-const canonicalUserData = path.join(appData, "atlas-live-agentic-support");
-for (const legacyName of ["atsla-support-live-agent", "atlas-live-agent-support"]) {
+const canonicalUserData = path.join(appData, "atlas-agent");
+for (const legacyName of ["atlas-live-agentic-support", "atsla-support-live-agent", "atlas-live-agent-support"]) {
   const legacyUserData = path.join(appData, legacyName);
   if (!existsSync(canonicalUserData) && existsSync(legacyUserData)) {
     try { renameSync(legacyUserData, canonicalUserData); } catch {}
   }
 }
-app.setName("atlas-live-agentic-support");
+app.setName("atlas-agent");
 app.setPath("userData", canonicalUserData);
 
 async function request(pathname, options = {}) {
