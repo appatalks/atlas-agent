@@ -60,6 +60,18 @@ setup_voice_module() {
   bash "$VOICE_MODULE_DIR/install.sh"
 }
 
+repair_voice_module_link() {
+  local python="$VOICE_MODULE_DIR/.venv/bin/python"
+  [[ -x "$python" ]] || return 0
+  "$python" -c 'import voice_clone_module' >/dev/null 2>&1 && return 0
+  need uv || {
+    echo "uv is required to repair the moved voice_clone_module environment." >&2
+    exit 1
+  }
+  echo "Repairing voice_clone_module editable install for $VOICE_MODULE_DIR"
+  uv pip install --python "$python" --no-deps --editable "$VOICE_MODULE_DIR"
+}
+
 install_electron_runtime() {
   local electron_dir="$ROOT_DIR/node_modules/electron"
   [[ -x "$electron_dir/dist/electron" ]] && return 0
@@ -147,6 +159,7 @@ main() {
   npm install --include=dev
   install_electron_runtime
   setup_voice_module
+  repair_voice_module_link
   if [[ "$INSTALL_WHISPER" == "true" ]]; then
     bash "$ROOT_DIR/tools/bootstrap-whisper.sh"
   fi

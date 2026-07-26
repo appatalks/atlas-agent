@@ -77,6 +77,7 @@ start() {
   fi
 
   local python="$ROOT_DIR/vendor/voice_clone_module/.venv/bin/python"
+  local voice_module_source="$ROOT_DIR/vendor/voice_clone_module/src"
   local tts_mode="${VOICE_BRIDGE_TTS_MODE:-}"
   if [[ -z "$tts_mode" || "$tts_mode" == "auto" ]]; then
     [[ -n "${VOICE_BRIDGE_REMOTE_TTS_URL:-}" ]] && tts_mode="remote" || tts_mode="local"
@@ -91,7 +92,7 @@ start() {
   case "$tts_mode" in
     local)
       voice_url="http://127.0.0.1:8090/"
-      launch voice env VOICE_BRIDGE_TTS_AUTH_TOKEN="${VOICE_BRIDGE_TTS_AUTH_TOKEN:-}" "$python" "$ROOT_DIR/tools/local_voice_bridge.py" --host 127.0.0.1 --port 8090 --reference "$voice_reference" --eva-reference "$eva_reference" --seed-audio "$greeting_seed" --seed-reference-sha256 "$greeting_seed_reference_sha256" --warm-text "$standard_greeting" --warm-exaggeration 0.65 --warm-cfg-weight 0.35
+      launch voice env PYTHONPATH="$voice_module_source${PYTHONPATH:+:$PYTHONPATH}" VOICE_BRIDGE_TTS_AUTH_TOKEN="${VOICE_BRIDGE_TTS_AUTH_TOKEN:-}" "$python" "$ROOT_DIR/tools/local_voice_bridge.py" --host 127.0.0.1 --port 8090 --reference "$voice_reference" --eva-reference "$eva_reference" --seed-audio "$greeting_seed" --seed-reference-sha256 "$greeting_seed_reference_sha256" --warm-text "$standard_greeting" --warm-exaggeration 0.65 --warm-cfg-weight 0.35
       ;;
     remote)
       voice_url="${VOICE_BRIDGE_REMOTE_TTS_URL:-}"

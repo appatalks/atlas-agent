@@ -40,11 +40,12 @@ class VoiceService:
         except Exception as error:
             backend_available = False
             self.load_error = str(error)
+        reference_readable = self.reference.is_file()
         return {
-            "ok": True,
+            "ok": backend_available and reference_readable,
             "engine_loaded": bool(self.engines),
             "backend_available": backend_available,
-            "reference_readable": self.reference.is_file(),
+            "reference_readable": reference_readable,
             "reference_path": str(self.reference),
             "voice_profiles": {profile: reference.is_file() for profile, reference in self.references.items()},
             "loaded_voice_profiles": sorted(self.engines),
@@ -147,7 +148,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self.require_auth():
             return
-        self.send_json(HTTPStatus.OK, self.service.health())
+        health = self.service.health()
+        self.send_json(HTTPStatus.OK if health["ok"] else HTTPStatus.SERVICE_UNAVAILABLE, health)
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path.rstrip("/") != "/v1/speech":

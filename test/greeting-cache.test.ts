@@ -18,6 +18,7 @@ describe("AppaTalks Standard Greeting cache", () => {
     expect(existsSync(`${root}/assets/voices/appatalks-voice.wav`)).toBe(true);
     expect(existsSync(`${root}/assets/voices/eva-voice.wav`)).toBe(true);
     expect(supervisor).toContain('assets/voices/appatalks-voice.wav');
+    expect(supervisor).toContain('PYTHONPATH="$voice_module_source${PYTHONPATH:+:$PYTHONPATH}"');
   });
 
   it("persists only warmed greeting audio and keys it to the reference and expression settings", () => {
@@ -28,5 +29,6 @@ describe("AppaTalks Standard Greeting cache", () => {
     expect(bridge).toContain('"voice_profiles"');
     expect(bridge).toContain('profile_id == "appatalks"');
     expect(bridge).toContain("seed_reference_sha256");
+    expect(bridge).toContain('HTTPStatus.OK if health["ok"] else HTTPStatus.SERVICE_UNAVAILABLE');
   });
 });

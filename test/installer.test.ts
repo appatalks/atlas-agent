@@ -18,6 +18,8 @@ describe("installation entry points", () => {
     expect(installer).toContain('[[ "$INSTALL_VOICE" == "true" ]] || return 0');
     expect(installer).toContain('node "$electron_dir/install.js"');
     expect(installer).toContain('npm install --include=dev');
+    expect(installer).toContain("repair_voice_module_link");
+    expect(installer).toContain('uv pip install --python "$python" --no-deps --editable "$VOICE_MODULE_DIR"');
     expect(installer).toContain("ATLAS requires Node.js 24 or newer");
     expect(bootstrap).toContain("Migrating ATSLA installation to ATLAS");
     expect(readme).toContain("docs/atlas-agent-splash.png");
