@@ -114,6 +114,7 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain('id="discoverAdxDatabases"');
     expect(dashboard.body).toContain('id="refreshClientDatabases"');
     expect(dashboard.body).toContain("loadAdxClientDatabases");
+    expect(dashboard.body).toContain("!/^atsla-/i.test(database)");
     expect(dashboard.body).toContain("Default public knowledge database");
     expect(dashboard.body).toContain("Optional; public knowledge stays local when blank");
     expect(dashboard.body).toContain("publicOnly:true");
