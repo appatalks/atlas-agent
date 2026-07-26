@@ -100,7 +100,7 @@ meetings/
 
 Each client has a physically separate SQLite cache keyed by stable client ID. In ADX mode that cache materializes only the client database selected in the main **Client** window, preserving identical FTS retrieval and low live-call latency. The shared public knowledge base remains a durable operator folder with its own local cache and synchronizes to ADX only when an operator selects a public database. ATSLA chooses database routes from operator state and stable client identity, not caller text, and sends the reasoning model only bounded retrieved excerpts. The model receives no SQL, KQL, database selector, client registry, or database tool.
 
-Sessions are persisted under `~/.local/share/voice-bridge/sessions/` and include their stable client scope. The application lists, opens, and renames only sessions belonging to the selected client or the dedicated public-only scope. Starting a session always sends the Standard Greeting once. Switching clients persists the prior session, clears live transcript/drafts/escalations, unloads client context, and starts with an empty session list when that scope has no prior sessions.
+Sessions are persisted under `~/.local/share/voice-bridge/sessions/` and include their stable client scope plus an `active`, `awaiting-feedback`, or `completed` lifecycle. The application lists, opens, and renames only sessions belonging to the selected client or the dedicated public-only scope. Starting a session always sends the Standard Greeting once. A clear customer resolution phrase such as "that fixed it" requests outcome feedback automatically. The next customer turn completes the session, or the operator can use **Ask feedback & finish** and **Finish without feedback**. Switching clients persists the prior session, clears live transcript/drafts/escalations, unloads client context, and starts with an empty session list when that scope has no prior sessions.
 
 When an optional supplementary folder is configured, remote observations and generated summaries can be staged under its `learnings/` directory. They do not enter active recall until an operator reviews the files and explicitly reloads that client. Verbatim transcript and summary files are stored under `meetings/` only when their respective retention options are enabled. Database-only clients retain sessions and reviewed knowledge proposals without requiring filesystem artifacts.
 
@@ -126,7 +126,11 @@ Best practices:
 
 ### Reviewed Knowledge Updates
 
-Imported files and operator policies are not writable by the conversation model. AI-generated meeting summaries create pending proposals under `ai/session-summaries/` in the active client's database. Proposed content is excluded from recall until an operator approves it in **Settings > Workspace**. Rejection leaves recall unchanged; approval publishes a new immutable document version; retirement proposals remove a document from recall without deleting its history.
+Imported files and operator policies are not writable by the conversation model. Manual AI-generated meeting summaries create pending proposals under `ai/session-summaries/` in the active client's database. On session completion, the model instead returns a structured evaluation with outcome, reusable candidates, confidence, risk, and exact transcript evidence. Application policy, not the model alone, decides promotion.
+
+An autonomous candidate can publish only when the session is resolved, the candidate is low risk, at least one evidence quote exactly matches the transcript, the content passes deterministic sensitive-data and prompt-injection filters, and confidence is at least `0.96` without positive feedback or `0.90` with a score of four or five. A score of one or two blocks automatic promotion. Medium-risk or lower-confidence valid candidates remain pending; high-risk, unsafe, or ungrounded candidates are discarded before reaching ADX. Repetition never upgrades autonomous material to seed or operator authority.
+
+Approved learned topics use stable `learned/<topic>.md` paths, so repeated successful sessions update one versioned procedure rather than creating one document per call. Retrieval combines lexical relevance with bounded authority, confidence, evidence count, positive/negative feedback, and validation recency. Seed and operator knowledge retain an authority advantage. Operators can disable autonomous promotion or feedback under **Settings > Agent**, review pending proposals, retire a learned topic, or replace the client database from a known-good seed.
 
 Proposal scope is resolved from operator state. Client proposal operations require explicitly loaded client context and synchronize to that client's configured backend. Public proposals remain in the durable shared folder's local knowledge store and synchronize to ADX only when a public database is selected. Switching clients changes the proposal namespace immediately. Guardrail policies cannot be changed through the proposal API.
 
@@ -156,9 +160,9 @@ On first device-code use, open the displayed Microsoft device-login page and ent
 
 Use a separate ADX database and scoped RBAC identity per private client. When configured, the optional default database carries only shared public knowledge. Do not use one unrestricted identity across unrelated customer databases.
 
-On **Load context**, ATSLA pulls the latest matching ADX snapshot when present, refreshes reviewed file imports locally, and appends the merged versioned snapshot back to the same resolved database. Approved proposals also synchronize after mutation. Explicit **Pull** and **Push** controls are available for recovery and administration.
+On **Load context**, ATSLA pulls the latest matching ADX snapshot when present, refreshes reviewed file imports locally, and appends the merged versioned snapshot back to the same resolved database. Approved and autonomously promoted proposals also synchronize after mutation. Explicit **Pull** and **Push** controls are available for recovery and administration.
 
-Portable JSON snapshots include documents, immutable versions, policies, and proposal state. Client snapshots move between SQLite and ADX; public snapshots back up or restore the local shared store. The snapshot scope ID must match the selected client or public scope, so cross-client imports are rejected.
+Portable JSON snapshots include documents, quality metadata, immutable versions, policies, proposal state, and compaction metadata. Client snapshots move between SQLite and ADX; public snapshots back up or restore the local shared store. To bound long-running ADX transfers, each snapshot carries the latest 20 versions per document and latest 1,000 proposals while the local SQLite audit database keeps full history. The snapshot scope ID must match the selected client or public scope, so cross-client imports are rejected.
 
 ### Azure Data Explorer Authentication
 
@@ -281,6 +285,7 @@ Use **Glass transparency** to balance the layered background against dense text.
 | `POST /v1/knowledge/:scope/sync` | Explicitly pull or push client or public knowledge through the configured backend. |
 | `GET /v1/sessions` | List sessions for the selected client or public-only scope. |
 | `POST /v1/sessions` | Start a selected-client or public-only session and send the Standard Greeting. |
+| `POST /v1/sessions/complete` | Request customer feedback or complete and evaluate the active session for policy-gated learning. |
 | `POST /v1/transcripts` | Submit a transcript event. |
 | `POST /v1/drafts` | Generate a draft response. |
 | `POST /v1/drafts/:draftId/authorize` | Speak an approved draft. |
@@ -294,6 +299,16 @@ npm test
 npm run typecheck
 npm run simulate
 ```
+
+### Client Database Seed
+
+[template-database-seed](template-database-seed) defines a first-class support knowledge layout: client profile, product catalog, troubleshooting playbooks, known issues, escalation matrix, customer preferences, guardrails, and a reserved learned-topic namespace. Replace its placeholders, then build a portable seed:
+
+```bash
+npm run seed:template -- client-id template-database-seed ./client-id.seed.json
+```
+
+The generated documents carry `seed` authority and confidence `1`. Import the snapshot after selecting and loading the exact client ID. This provides a reproducible reset point if autonomous knowledge ever degrades; import the known-good snapshot in replace mode, then reintroduce only reviewed learning.
 
 ### Two-Client ADX Sandbox
 

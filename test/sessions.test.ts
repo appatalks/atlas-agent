@@ -29,6 +29,7 @@ describe("persistent meeting sessions", () => {
       coordinator.selectClientWorkspace({ name: "Northwind", supplementaryContextPath: clientWorkspace });
       const first = await coordinator.createSession({ title: "Northwind kickoff" });
       expect(first.greetingSent).toBe(true);
+      expect(first.status).toBe("active");
       expect(coordinator.state().drafts.filter((draft) => draft.question === "Operator template")).toHaveLength(1);
       await coordinator.ingest({ id: "remote-1", speaker: "remote", text: "We need to review reliability.", occurredAt: new Date().toISOString() });
       const second = await coordinator.createSession({ title: "Contoso follow-up" });
@@ -44,6 +45,7 @@ describe("persistent meeting sessions", () => {
       expect(renamed.title).toBe("Northwind reliability review");
       expect(sessions.get(first.id).title).toBe("Northwind reliability review");
       expect(coordinator.listSessions().find((session) => session.id === first.id)?.title).toBe("Northwind reliability review");
+      expect(coordinator.listSessions().find((session) => session.id === first.id)?.status).toBe("active");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

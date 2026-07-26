@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
-import { NO_RESPONSE_SENTINEL, responseTemplates, type AgentActivity, type ChatProvider, type Draft, type EscalationRequest, type LocalModelId, type MeetingSession, type MeetingSessionSummary, type ModelReply, type ResponseMode, type SessionTelemetry, type TranscriptEvent } from "./domain.js";
+import { CUSTOMER_FEEDBACK_REQUEST, NO_RESPONSE_SENTINEL, responseTemplates, type AgentActivity, type ChatProvider, type Draft, type EscalationRequest, type LocalModelId, type MeetingSession, type MeetingSessionSummary, type ModelReply, type ResponseMode, type SessionCompletion, type SessionResolution, type SessionTelemetry, type TranscriptEvent } from "./domain.js";
 import { DraftStore, ResponsePolicy } from "./policy.js";
 import { type VoiceBridgeSettings, type ClientConfiguration, type CopilotReasoningEffort, ClientWorkspace, SettingsStore, defaultSettings, knowledgeBackendConfig, publicKnowledgeBackendConfig } from "./settings.js";
 import { type SpeechDispatch, type SpeechOutput } from "./voice.js";
@@ -9,6 +9,22 @@ import { type CreateKnowledgeProposal, type KnowledgeProposal, type KnowledgeSco
 import { type KnowledgeSyncResult } from "./knowledge-backend.js";
 
 const PUBLIC_SESSION_CLIENT_ID = "public-knowledge-only";
+
+interface LearningCandidateEvaluation {
+  disposition: "promote" | "hold" | "discard";
+  sourcePath: string;
+  title: string;
+  content: string;
+  confidence: number;
+  risk: "low" | "medium" | "high";
+  evidence: string[];
+}
+
+interface SessionLearningEvaluation {
+  summary: string;
+  resolution: SessionResolution;
+  candidates: LearningCandidateEvaluation[];
+}
 
 export class MeetingCoordinator {
   private readonly transcript: TranscriptEvent[] = [];
@@ -83,6 +99,11 @@ export class MeetingCoordinator {
       return;
     }
     const supplementaryContextPath = this.activeClient()?.supplementaryContextPath ?? "";
+    if (event.speaker === "remote" && this.activeSession?.status === "awaiting-feedback") {
+      if (this.settings.saveMeetingLog) this.workspace.appendTranscript(supplementaryContextPath, `- ${event.occurredAt} Remote feedback: ${event.text}`);
+      await this.completeSession({ feedbackText: event.text, feedbackScore: inferFeedbackScore(event.text) });
+      return;
+    }
     if (event.speaker === "remote" && this.activeSession && this.settings.retainSessionLearnings && supplementaryContextPath) {
       this.workspace.appendLearning(
         supplementaryContextPath,
@@ -96,6 +117,11 @@ export class MeetingCoordinator {
     }
     if (event.speaker === "remote" && this.settings.saveMeetingLog) {
       this.workspace.appendTranscript(supplementaryContextPath, `- ${event.occurredAt} Remote: ${event.text}`);
+    }
+    if (event.speaker === "remote" && this.activeSession?.status === "active" && isCompletionIntent(event.text)) {
+      if (this.settings.customerFeedbackEnabled) await this.requestSessionFeedback();
+      else await this.completeSession();
+      return;
     }
     if (event.speaker === "remote" && this.shouldReplyAutonomously(event.text)) {
       if (/\b(agent|assistant|eva)\b/i.test(event.text)) await this.autonomousReply();
@@ -339,8 +365,103 @@ export class MeetingCoordinator {
     return this.sessionStore?.list(this.sessionClientId()) ?? [];
   }
 
-  activeSessionInfo(): { id: string; title: string } | null {
-    return this.activeSession ? { id: this.activeSession.id, title: this.activeSession.title } : null;
+  activeSessionInfo(): { id: string; title: string; status: MeetingSession["status"]; resolution?: SessionResolution } | null {
+    return this.activeSession ? { id: this.activeSession.id, title: this.activeSession.title, status: this.activeSession.status, resolution: this.activeSession.completion?.resolution } : null;
+  }
+
+  async requestSessionFeedback(): Promise<{ session: MeetingSession; awaitingFeedback: boolean }> {
+    if (!this.activeSession) throw new Error("Start a session before requesting customer feedback.");
+    if (this.activeSession.status === "completed") return { session: structuredClone(this.activeSession), awaitingFeedback: false };
+    if (this.activeSession.status !== "awaiting-feedback") {
+      this.activeSession.status = "awaiting-feedback";
+      this.record("listening", "Waiting for customer resolution feedback.");
+      this.persistSession();
+      await this.speakTemplate(CUSTOMER_FEEDBACK_REQUEST);
+    }
+    return { session: structuredClone(this.activeSession), awaitingFeedback: true };
+  }
+
+  async completeSession(request: { requestFeedback?: boolean; feedbackText?: string; feedbackScore?: number | null } = {}): Promise<{ session: MeetingSession; awaitingFeedback: boolean; promoted: KnowledgeProposal[]; pending: KnowledgeProposal[]; discarded: number }> {
+    if (!this.activeSession) throw new Error("Start a session before completing it.");
+    if (this.activeSession.status === "completed") {
+      return { session: structuredClone(this.activeSession), awaitingFeedback: false, promoted: [], pending: [], discarded: this.activeSession.completion?.discardedCandidates ?? 0 };
+    }
+    if (request.requestFeedback && !request.feedbackText?.trim()) {
+      const result = await this.requestSessionFeedback();
+      return { ...result, promoted: [], pending: [], discarded: 0 };
+    }
+
+    const feedbackText = request.feedbackText?.trim().slice(0, 2_000) ?? "";
+    const feedbackScore = normalizeFeedbackScore(request.feedbackScore ?? (feedbackText ? inferFeedbackScore(feedbackText) : null));
+    const evaluation = await this.evaluateSessionLearning(feedbackText, feedbackScore);
+    const resolution = this.escalations.some((item) => item.status === "pending")
+      ? "escalated"
+      : feedbackScore !== null && feedbackScore <= 2 ? "unresolved" : evaluation.resolution;
+    const client = this.loadedClientId ? this.activeClient() : undefined;
+    const plans: Array<{ input: CreateKnowledgeProposal; autoApprove: boolean }> = [];
+    let discarded = 0;
+    for (const candidate of evaluation.candidates.slice(0, 5)) {
+      const evidence = validEvidence(candidate.evidence, this.transcript);
+      const safe = !containsUnsafeLearning(candidate.title, candidate.content);
+      if (candidate.disposition === "discard" || !client || !evidence.length || !safe || candidate.risk === "high") {
+        discarded += 1;
+        continue;
+      }
+      const sourcePath = normalizeLearnedSourcePath(candidate.sourcePath, candidate.title);
+      if (!sourcePath || !candidate.title.trim() || !candidate.content.trim()) {
+        discarded += 1;
+        continue;
+      }
+      const quality = {
+        authority: "autonomous" as const,
+        confidence: clampConfidence(candidate.confidence),
+        evidenceCount: evidence.length,
+        positiveFeedback: feedbackScore !== null && feedbackScore >= 4 ? 1 : 0,
+        negativeFeedback: feedbackScore !== null && feedbackScore <= 2 ? 1 : 0,
+        lastValidatedAt: new Date().toISOString(),
+      };
+      const input: CreateKnowledgeProposal = {
+        operation: "upsert",
+        sourcePath,
+        title: candidate.title.trim().slice(0, 200),
+        content: candidate.content.trim().slice(0, 20_000),
+        evidenceSessionId: this.activeSession.id,
+        quality,
+      };
+      const threshold = feedbackScore !== null && feedbackScore >= 4 ? 0.9 : 0.96;
+      const autoPromote = candidate.disposition === "promote"
+        && this.settings.autonomousLearningEnabled
+        && candidate.risk === "low"
+        && resolution === "resolved"
+        && (feedbackScore === null || feedbackScore >= 3)
+        && quality.confidence >= threshold;
+      plans.push({ input, autoApprove: autoPromote });
+    }
+
+    const { promoted, pending } = client
+      ? await this.workspace.applyClientKnowledgeProposals(client, plans, knowledgeBackendConfig(this.settings))
+      : { promoted: [], pending: [] };
+
+    const supplementaryPath = client?.supplementaryContextPath ?? "";
+    const summaryPath = this.settings.summarizeMeeting ? this.workspace.appendSummary(supplementaryPath, evaluation.summary) : "";
+    if (this.settings.retainSessionLearnings && supplementaryPath) {
+      this.workspace.appendLearning(supplementaryPath, this.activeSession.id, `\n## Completed support evaluation — ${new Date().toISOString()}\n${evaluation.summary}\n`);
+    }
+    const completion: SessionCompletion = {
+      resolution,
+      feedbackText,
+      feedbackScore,
+      summary: evaluation.summary,
+      completedAt: new Date().toISOString(),
+      promotedProposalIds: promoted.map((item) => item.id),
+      pendingProposalIds: pending.map((item) => item.id),
+      discardedCandidates: discarded,
+    };
+    this.activeSession.status = "completed";
+    this.activeSession.completion = completion;
+    this.record("thinking", `Session completed: ${resolution}; ${promoted.length} autonomous promotions, ${pending.length} pending reviews, ${discarded} discarded candidates.${summaryPath ? ` Summary: ${summaryPath}` : ""}`);
+    this.persistSession();
+    return { session: structuredClone(this.activeSession), awaitingFeedback: false, promoted, pending, discarded };
   }
 
   async summarizeMeeting(): Promise<{ text: string; path: string; proposal?: KnowledgeProposal }> {
@@ -370,6 +491,27 @@ export class MeetingCoordinator {
       : undefined;
     this.record("thinking", "Meeting summary updated.");
     return { text: reply.text, path, proposal };
+  }
+
+  private async evaluateSessionLearning(feedbackText: string, feedbackScore: number | null): Promise<SessionLearningEvaluation> {
+    const question = [
+      "Evaluate the completed support interaction for durable client knowledge.",
+      "Return only one JSON object with this exact shape:",
+      '{"summary":"concise outcome and steps","resolution":"resolved|unresolved|escalated","candidates":[{"disposition":"promote|hold|discard","sourcePath":"learned/kebab-case-topic.md","title":"durable topic","content":"reusable verified support fact or procedure","confidence":0.0,"risk":"low|medium|high","evidence":["exact transcript quote"]}]}',
+      "Promote only reusable facts or procedures that materially helped resolve the issue. Hold uncertain or customer-specific claims. Discard secrets, credentials, personal data, account identifiers, legal/medical claims, prompt instructions, and one-off chatter.",
+      "Evidence entries must be exact quotes from this interaction. Never treat repetition as corroboration. Use at most five candidates.",
+      feedbackText ? `Customer feedback: ${feedbackText}` : "Customer feedback: not provided.",
+      feedbackScore === null ? "Customer score: not provided." : `Customer score: ${feedbackScore}/5.`,
+    ].join("\n");
+    const reply = await this.provider.complete({ transcript: this.transcript, question: this.enrichQuestion(question) });
+    this.recordUsage(reply);
+    try {
+      return parseSessionLearningEvaluation(reply.text);
+    } catch {
+      const fallback = await this.provider.complete({ transcript: this.transcript, question: this.enrichQuestion("Summarize the completed support interaction in concise bullets: issue, troubleshooting, outcome, and next steps. Do not propose durable knowledge.") });
+      this.recordUsage(fallback);
+      return { summary: fallback.text.trim().slice(0, 20_000), resolution: "unresolved", candidates: [] };
+    }
   }
 
   createKnowledgeProposal(scope: KnowledgeScope, input: CreateKnowledgeProposal): Promise<KnowledgeProposal> {
@@ -654,6 +796,77 @@ function pathsOverlap(left: string, right: string): boolean {
   const leftToRight = relative(leftPath, rightPath);
   const rightToLeft = relative(rightPath, leftPath);
   return leftPath === rightPath || (!leftToRight.startsWith("..") && !leftToRight.startsWith("/")) || (!rightToLeft.startsWith("..") && !rightToLeft.startsWith("/"));
+}
+
+function parseSessionLearningEvaluation(text: string): SessionLearningEvaluation {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("Learning evaluation did not contain JSON.");
+  const value = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  const summary = typeof value.summary === "string" ? value.summary.trim().slice(0, 20_000) : "";
+  if (!summary) throw new Error("Learning evaluation summary is required.");
+  const resolution: SessionResolution = value.resolution === "resolved" || value.resolution === "escalated" ? value.resolution : "unresolved";
+  const candidates = Array.isArray(value.candidates) ? value.candidates.flatMap((item): LearningCandidateEvaluation[] => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as Record<string, unknown>;
+    const disposition = candidate.disposition === "promote" || candidate.disposition === "hold" ? candidate.disposition : "discard";
+    const risk = candidate.risk === "low" || candidate.risk === "medium" ? candidate.risk : "high";
+    return [{
+      disposition,
+      sourcePath: typeof candidate.sourcePath === "string" ? candidate.sourcePath.slice(0, 300) : "",
+      title: typeof candidate.title === "string" ? candidate.title.slice(0, 200) : "",
+      content: typeof candidate.content === "string" ? candidate.content.slice(0, 20_000) : "",
+      confidence: clampConfidence(typeof candidate.confidence === "number" ? candidate.confidence : 0),
+      risk,
+      evidence: Array.isArray(candidate.evidence) ? candidate.evidence.filter((entry): entry is string => typeof entry === "string").slice(0, 10) : [],
+    }];
+  }) : [];
+  return { summary, resolution, candidates: candidates.slice(0, 5) };
+}
+
+function validEvidence(evidence: string[], transcript: TranscriptEvent[]): string[] {
+  const transcriptText = transcript.map((event) => normalizeEvidence(event.text));
+  return [...new Set(evidence.map((quote) => quote.trim()).filter((quote) => {
+    const normalized = normalizeEvidence(quote);
+    return normalized.length >= 8 && transcriptText.some((event) => event.includes(normalized));
+  }))];
+}
+
+function normalizeEvidence(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function containsUnsafeLearning(title: string, content: string): boolean {
+  const value = `${title}\n${content}`;
+  return /\b(?:password|passcode|secret|api[ _-]?key|access[ _-]?token|private[ _-]?key|social security|ssn|credit card|bank account|date of birth|medical record|diagnos(?:is|e)|legal advice|ignore (?:all |the )?(?:previous|prior) instructions|system prompt|developer message|jailbreak)\b/i.test(value);
+}
+
+function normalizeLearnedSourcePath(sourcePath: string, title: string): string {
+  const normalized = sourcePath.trim().toLowerCase().replaceAll("\\", "/");
+  if (/^learned\/[a-z0-9][a-z0-9-]{1,79}\.md$/.test(normalized)) return normalized;
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+  return slug.length >= 2 ? `learned/${slug}.md` : "";
+}
+
+function clampConfidence(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+}
+
+function normalizeFeedbackScore(value: number | null): number | null {
+  return Number.isFinite(value) ? Math.max(1, Math.min(5, Math.round(Number(value)))) : null;
+}
+
+function inferFeedbackScore(text: string): number | null {
+  const explicit = /(?:\b(?:rating|score|rate(?: it)?)\D{0,12}([1-5])\b|\b([1-5])\s*(?:\/\s*5|out of 5|stars?)\b|^\s*([1-5])\s*$)/i.exec(text)?.slice(1).find(Boolean);
+  if (explicit) return Number(explicit);
+  if (/\b(?:no further (?:issues?|problems?)|resolved|fixed|working now|all set|great|excellent|helpful|thank you|thanks)\b/i.test(text)) return 5;
+  if (/\b(?:did not|didn't|not resolved|not fixed|still broken|no|bad|poor|unhelpful)\b/i.test(text)) return 1;
+  if (/\byes\b/i.test(text)) return 5;
+  return null;
+}
+
+function isCompletionIntent(text: string): boolean {
+  return /\b(?:that (?:fixed|solved|resolved) it|it(?:'s| is) (?:fixed|resolved|working now)|issue (?:is )?resolved|all set now|that(?:'s| is) all|no further help|nothing else|we(?:'re| are) good)\b/i.test(text);
 }
 
 export function isNonActionableTranscript(text: string): boolean {

@@ -195,6 +195,10 @@ export function buildServer() {
     try { return { session: await coordinator.createSession(request.body) }; }
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Session creation failed." }); }
   });
+  app.post<{ Body: { requestFeedback?: boolean; feedbackText?: string; feedbackScore?: number | null } }>("/v1/sessions/complete", async (request, reply) => {
+    try { return await coordinator.completeSession(request.body); }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Session completion failed." }); }
+  });
   app.post<{ Params: { sessionId: string } }>("/v1/sessions/:sessionId/select", async (request, reply) => {
     try { return { session: coordinator.selectSession(request.params.sessionId) }; }
     catch (error) { return reply.code(404).send({ error: error instanceof Error ? error.message : "Session selection failed." }); }

@@ -2,7 +2,7 @@
 
 ![ATSLA Support Live Agent](docs/atsla-agent.png)
 
-[Technical guide](README-2.md) | [Client template](template-client-folder) | [Public knowledge template](template-public-knowledgebase) | [Issues](https://github.com/appatalks/atsla-support-live-agent/issues)
+[Technical guide](README-2.md) | [Database seed](template-database-seed) | [Client template](template-client-folder) | [Public knowledge template](template-public-knowledgebase) | [Issues](https://github.com/appatalks/atsla-support-live-agent/issues)
 
 ATSLA is a local, operator-controlled AI support agent for live customer conversations. It listens to call audio, starts with shared public knowledge, adds private knowledge only for the client selected by the operator, applies explicit global and client guardrails, and speaks through voice profiles when the operator authorizes or enables autonomous participation.
 
@@ -41,6 +41,7 @@ atsla
 | **Client isolation** | Public-only operation by default, then stable client-ID routing to separate SQLite caches or explicitly selected ADX databases, with no model-accessible database tools. |
 | **Portable knowledge** | Versioned JSON snapshots move the same policies, documents, proposals, and history between SQLite and Azure Data Explorer. |
 | **Shared public knowledge** | One durable, folder-backed source stays local by default and can optionally use a selected public ADX database without weakening client isolation. |
+| **Autonomous improvement** | Completed sessions are evaluated for reusable learning; only resolved, low-risk, exact-evidence candidates can auto-promote, with customer feedback as a bounded quality signal. |
 | **Guardrails** | Global and per-client disclosure, sensitivity, and escalation rules take precedence over reference material. |
 | **Local reasoning** | Local Qwen or authenticated GitHub Copilot CLI reasoning. |
 
@@ -50,8 +51,8 @@ atsla
 2. Choose Local SQLite or Azure Data Explorer in **Settings > Workspace**, then configure a durable shared public knowledge folder from [template-public-knowledgebase](template-public-knowledgebase). Leave the optional public database blank to keep that scope local.
 3. Use the main **Client** window to stay in **Public knowledge only**, select an automatically discovered ADX database, or select/create a local SQLite client.
 4. In SQLite mode, optionally add a folder based on [template-client-folder](template-client-folder) for additive session context and meeting artifacts, then select **Load context**.
-5. Start a session. ATSLA sends the Standard Greeting once.
-6. Choose Monitor, Approve, or Autonomous mode. Use takeover whenever a person should resume the conversation.
+5. Start a session. ATSLA sends the Standard Greeting once. A clear resolution phrase can trigger customer feedback and autonomous learning evaluation, or the operator can choose **Ask feedback & finish**.
+6. Choose Monitor, Approve, or Autonomous mode. Use takeover whenever a person should resume the conversation. Autonomous learning and customer feedback can be disabled independently under **Settings > Agent**.
 
 The committed templates are fictional examples. Real client data, supplementary context folders, and generated `.atsla/` databases belong outside this repository.
 

@@ -39,6 +39,8 @@ export interface VoiceBridgeSettings {
   inputModel: string;
   copilotModel: string;
   copilotReasoningEffort: CopilotReasoningEffort;
+  autonomousLearningEnabled: boolean;
+  customerFeedbackEnabled: boolean;
   ttsEngineUrl: string;
   voiceProfile: string;
   voiceProfiles: VoiceProfile[];
@@ -116,7 +118,7 @@ export function defaultSettings(): VoiceBridgeSettings {
     false,
   );
   return {
-    settingsVersion: 12,
+    settingsVersion: 13,
     appearanceTheme: "atsla",
     glassTransparency: 88,
     responseMode: "autonomous",
@@ -125,6 +127,8 @@ export function defaultSettings(): VoiceBridgeSettings {
     inputModel: "qwen3-8b",
     copilotModel: "gpt-5.6-luna",
     copilotReasoningEffort: "default",
+    autonomousLearningEnabled: true,
+    customerFeedbackEnabled: true,
     ttsEngineUrl: process.env.LOCAL_VOICE_BRIDGE_URL ?? process.env.VOICE_BRIDGE_REMOTE_TTS_URL ?? "http://127.0.0.1:8090/",
     voiceProfile: "AppaTalks",
     voiceProfiles: defaultVoiceProfiles.map((profile) => ({ ...profile })),
@@ -216,11 +220,11 @@ export class SettingsStore {
       const stored = JSON.parse(readFileSync(this.settingsPath, "utf8")) as Partial<VoiceBridgeSettings>;
       const preV5 = !stored.settingsVersion || stored.settingsVersion < 5;
       const requiresAppaTalksMigration = isLegacyDefaultVoiceSelection(stored.voiceProfile) || stored.voiceProfiles?.some(isLegacyDefaultVoiceProfile);
-      const requiresMigration = stored.settingsVersion !== 12 || requiresAppaTalksMigration;
+      const requiresMigration = stored.settingsVersion !== 13 || requiresAppaTalksMigration;
       const migrated = requiresMigration
         ? {
           ...stored,
-          settingsVersion: 12,
+          settingsVersion: 13,
           ...(stored.appearanceTheme === "atelier" ? { appearanceTheme: "atsla" as const } : {}),
           ...(preV5 ? { responseMode: "autonomous" as const, defaultInputMode: "agent" as const } : {}),
         }
@@ -316,8 +320,23 @@ export class ClientWorkspace {
     return this.createProposalAt("client", this.clientCachePath(client.id), input, config, this.clientRoute(client));
   }
 
-  reviewClientKnowledgeProposal(client: ClientConfiguration, proposalId: string, decision: "approve" | "reject", config: KnowledgeBackendConfig): Promise<KnowledgeProposal> {
-    return this.reviewProposalAt("client", this.clientCachePath(client.id), proposalId, decision, config, this.clientRoute(client));
+  reviewClientKnowledgeProposal(client: ClientConfiguration, proposalId: string, decision: "approve" | "reject", config: KnowledgeBackendConfig, reviewedBy = "operator"): Promise<KnowledgeProposal> {
+    return this.reviewProposalAt("client", this.clientCachePath(client.id), proposalId, decision, config, this.clientRoute(client), reviewedBy);
+  }
+
+  async applyClientKnowledgeProposals(client: ClientConfiguration, plans: Array<{ input: CreateKnowledgeProposal; autoApprove: boolean }>, config: KnowledgeBackendConfig): Promise<{ promoted: KnowledgeProposal[]; pending: KnowledgeProposal[] }> {
+    const result = this.withStorePath("client", this.clientCachePath(client.id), (store) => {
+      const promoted: KnowledgeProposal[] = [];
+      const pending: KnowledgeProposal[] = [];
+      for (const plan of plans) {
+        const proposal = store.createProposal(plan.input);
+        if (plan.autoApprove) promoted.push(store.reviewProposal(proposal.id, "approve", "atsla-autonomous-review"));
+        else pending.push(proposal);
+      }
+      return { promoted, pending };
+    });
+    if (plans.length) await this.pushClientKnowledge(client, config);
+    return result;
   }
 
   listClientKnowledgeProposals(clientId: string, status: KnowledgeProposal["status"] | "all" = "pending"): KnowledgeProposal[] {
@@ -630,8 +649,8 @@ export class ClientWorkspace {
     return proposal;
   }
 
-  private async reviewProposalAt(scope: KnowledgeScope, databasePath: string, proposalId: string, decision: "approve" | "reject", config: KnowledgeBackendConfig, route: { scope: KnowledgeScope; scopeId: string; explicitDatabase?: string; aliases?: string[] }): Promise<KnowledgeProposal> {
-    const proposal = this.withStorePath(scope, databasePath, (store) => store.reviewProposal(proposalId, decision));
+  private async reviewProposalAt(scope: KnowledgeScope, databasePath: string, proposalId: string, decision: "approve" | "reject", config: KnowledgeBackendConfig, route: { scope: KnowledgeScope; scopeId: string; explicitDatabase?: string; aliases?: string[] }, reviewedBy = "operator"): Promise<KnowledgeProposal> {
+    const proposal = this.withStorePath(scope, databasePath, (store) => store.reviewProposal(proposalId, decision, reviewedBy));
     await this.withStorePathAsync(scope, databasePath, (store) => this.backend(config).push(store, route));
     return proposal;
   }

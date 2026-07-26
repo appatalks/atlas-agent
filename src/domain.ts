@@ -27,6 +27,7 @@ export type ResponseMode = "disabled" | "suggest" | "approval" | "guarded-autono
 export type Speaker = "remote" | "local" | "agent";
 export const NO_RESPONSE_SENTINEL = "[[NO_RESPONSE]]";
 export const STANDARD_GREETING = "Hi, I am AppaTalks, your AI support agent. I can help with support questions and next steps. If you would like a live representative, say Live Representative Please and I will notify one. How can I help today?";
+export const CUSTOMER_FEEDBACK_REQUEST = "Before we wrap up, did this resolve your issue? You can answer yes or no, and optionally rate this support from one to five.";
 
 export interface TranscriptEvent {
   id: string;
@@ -99,6 +100,20 @@ export interface EscalationRequest {
   status: "pending" | "acknowledged";
 }
 
+export type SessionStatus = "active" | "awaiting-feedback" | "completed";
+export type SessionResolution = "resolved" | "unresolved" | "escalated";
+
+export interface SessionCompletion {
+  resolution: SessionResolution;
+  feedbackText: string;
+  feedbackScore: number | null;
+  summary: string;
+  completedAt: string;
+  promotedProposalIds: string[];
+  pendingProposalIds: string[];
+  discardedCandidates: number;
+}
+
 export interface MeetingSession {
   id: string;
   title: string;
@@ -107,6 +122,8 @@ export interface MeetingSession {
   createdAt: string;
   updatedAt: string;
   greetingSent: boolean;
+  status: SessionStatus;
+  completion?: SessionCompletion;
   transcript: TranscriptEvent[];
   drafts: Draft[];
   activity: AgentActivity[];
@@ -121,6 +138,8 @@ export interface MeetingSessionSummary {
   createdAt: string;
   updatedAt: string;
   greetingSent: boolean;
+  status: SessionStatus;
+  resolution?: SessionResolution;
   transcriptEvents: number;
 }
 
@@ -155,5 +174,10 @@ export const responseTemplates: ResponseTemplate[] = [
     id: "follow-up",
     label: "Follow-up",
     text: "I have documented that request and will make sure the appropriate team follows up.",
+  },
+  {
+    id: "customer-feedback",
+    label: "Request feedback",
+    text: CUSTOMER_FEEDBACK_REQUEST,
   },
 ];

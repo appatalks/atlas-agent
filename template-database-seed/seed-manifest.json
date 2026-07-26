@@ -1,0 +1,14 @@
+{
+  "format": "atsla-support-seed",
+  "version": 1,
+  "clientName": "[CLIENT NAME]",
+  "knowledgeOwner": "[TEAM OR ROLE]",
+  "reviewCadenceDays": 90,
+  "lastReviewedAt": "[ISO-8601 DATE]",
+  "authoritativeNamespaces": [
+    "knowledge/"
+  ],
+  "autonomousNamespace": "learned/",
+  "requiredEvidenceForAutonomousLearning": true,
+  "notes": "Replace placeholders and review every document before building the production seed."
+}

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "simulate": "tsx src/simulation.ts",
     "seed:demo-clients": "tsx tools/seed-demo-clients.ts",
+    "seed:template": "tsx tools/build-template-seed.ts",
     "audio:status": "bash tools/audio-bridge.sh status",
     "audio:dry-run": "bash tools/audio-bridge.sh start --dry-run",
     "whisper:dry-run": "bash tools/transcribe-stream.sh --dry-run",

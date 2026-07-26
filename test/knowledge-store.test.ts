@@ -108,6 +108,56 @@ describe("SQLite knowledge store", () => {
     }
   });
 
+  it("weights evidence-backed autonomous knowledge without treating repetition as authority", () => {
+    const root = mkdtempSync(join(tmpdir(), "atsla-knowledge-quality-"));
+    const store = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
+    try {
+      const weak = store.createProposal({
+        operation: "upsert",
+        sourcePath: "learned/weak-reset.md",
+        title: "Reset procedure",
+        content: "Use the unverified reset procedure for the gateway.",
+        evidenceSessionId: "session-weak",
+        quality: { authority: "autonomous", confidence: 0.7, evidenceCount: 1, negativeFeedback: 1 },
+      });
+      store.reviewProposal(weak.id, "approve", "atsla-autonomous-review");
+      const strong = store.createProposal({
+        operation: "upsert",
+        sourcePath: "learned/verified-reset.md",
+        title: "Reset procedure",
+        content: "Use the verified reset procedure for the gateway.",
+        evidenceSessionId: "session-strong",
+        quality: { authority: "autonomous", confidence: 0.96, evidenceCount: 3, positiveFeedback: 1 },
+      });
+      store.reviewProposal(strong.id, "approve", "atsla-autonomous-review");
+
+      expect(store.recall("reset procedure gateway", { maxChunks: 1 })[0].content).toContain("verified reset");
+      const snapshot = store.exportSnapshot("quality-client");
+      expect(snapshot.documents.find((document) => document.sourcePath === "learned/verified-reset.md")?.quality).toMatchObject({
+        authority: "autonomous",
+        confidence: 0.96,
+        evidenceCount: 3,
+        positiveFeedback: 1,
+      });
+
+      const humanReviewed = store.createProposal({
+        operation: "upsert",
+        sourcePath: "learned/human-reviewed.md",
+        title: "Human reviewed procedure",
+        content: "This procedure was explicitly reviewed by the operator.",
+        quality: { authority: "autonomous", confidence: 0.7, evidenceCount: 1 },
+      });
+      store.reviewProposal(humanReviewed.id, "approve", "support-operator");
+      expect(store.exportSnapshot("quality-client").documents.find((document) => document.sourcePath === "learned/human-reviewed.md")?.quality).toMatchObject({
+        authority: "operator",
+        confidence: 0.95,
+      });
+    } finally {
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("round-trips a portable snapshot across physical databases", () => {
     const root = mkdtempSync(join(tmpdir(), "atsla-knowledge-snapshot-"));
     const sourcePath = join(root, "source.sqlite");
@@ -153,6 +203,32 @@ describe("SQLite knowledge store", () => {
     } finally {
       source.close();
       target.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("compacts portable version history while retaining the current state", () => {
+    const root = mkdtempSync(join(tmpdir(), "atsla-knowledge-compaction-"));
+    const store = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
+    try {
+      for (let version = 1; version <= 25; version += 1) {
+        const proposal = store.createProposal({
+          operation: "upsert",
+          sourcePath: "learned/repeated-resolution.md",
+          title: "Repeated resolution",
+          content: `Resolution version ${version}.`,
+          evidenceSessionId: `session-${version}`,
+          quality: { authority: "autonomous", confidence: 0.95, evidenceCount: 1, positiveFeedback: 1 },
+        });
+        store.reviewProposal(proposal.id, "approve", "atsla-autonomous-review");
+      }
+
+      const snapshot = store.exportSnapshot("compaction-client");
+      expect(snapshot.documents[0].versions).toHaveLength(20);
+      expect(snapshot.documents[0].versions.at(-1)?.content).toBe("Resolution version 25.");
+      expect(snapshot.compaction).toMatchObject({ maxVersionsPerDocument: 20, maxProposals: 1_000, omittedVersions: 5, omittedProposals: 0 });
+    } finally {
+      store.close();
       rmSync(root, { recursive: true, force: true });
     }
   });

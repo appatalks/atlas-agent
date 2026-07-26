@@ -4,12 +4,23 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export type KnowledgeScope = "public" | "client";
+export type KnowledgeAuthority = "seed" | "operator" | "autonomous";
+
+export interface KnowledgeQuality {
+  authority: KnowledgeAuthority;
+  confidence: number;
+  evidenceCount: number;
+  positiveFeedback: number;
+  negativeFeedback: number;
+  lastValidatedAt: string;
+}
 
 export interface KnowledgeDocumentInput {
   sourcePath: string;
   title: string;
   content: string;
   classification?: "public" | "client" | "restricted";
+  quality?: Partial<KnowledgeQuality>;
 }
 
 export interface KnowledgePolicyInput {
@@ -37,6 +48,7 @@ export interface KnowledgeProposalPayload {
   sourcePath: string;
   title?: string;
   content?: string;
+  quality?: Partial<KnowledgeQuality>;
 }
 
 export interface KnowledgeProposal {
@@ -57,6 +69,7 @@ export interface CreateKnowledgeProposal {
   title?: string;
   content?: string;
   evidenceSessionId?: string;
+  quality?: Partial<KnowledgeQuality>;
 }
 
 export interface KnowledgeDocumentVersion {
@@ -76,6 +89,7 @@ export interface PortableKnowledgeDocument {
   contentHash: string;
   createdAt: string;
   updatedAt: string;
+  quality?: KnowledgeQuality;
   versions: KnowledgeDocumentVersion[];
 }
 
@@ -97,6 +111,12 @@ export interface KnowledgeSnapshot {
   documents: PortableKnowledgeDocument[];
   policies: PortableKnowledgePolicy[];
   proposals: KnowledgeProposal[];
+  compaction?: {
+    maxVersionsPerDocument: number;
+    maxProposals: number;
+    omittedVersions: number;
+    omittedProposals: number;
+  };
 }
 
 export interface KnowledgeStore {
@@ -119,6 +139,12 @@ interface StoredChunkRow {
   source_path: string;
   title: string;
   content: string;
+  authority: KnowledgeAuthority;
+  confidence: number;
+  evidence_count: number;
+  positive_feedback: number;
+  negative_feedback: number;
+  last_validated_at: string;
 }
 
 interface StoredProposalRow {
@@ -142,6 +168,12 @@ interface StoredDocumentRow {
   status: PortableKnowledgeDocument["status"];
   created_at: string;
   updated_at: string;
+  authority: KnowledgeAuthority;
+  confidence: number;
+  evidence_count: number;
+  positive_feedback: number;
+  negative_feedback: number;
+  last_validated_at: string;
 }
 
 interface StoredVersionRow {
@@ -161,8 +193,10 @@ interface StoredPolicyRow {
   updated_at: string;
 }
 
-const schemaVersion = 2;
+const schemaVersion = 3;
 const chunkCharacters = 1_600;
+const maxSnapshotVersionsPerDocument = 20;
+const maxSnapshotProposals = 1_000;
 
 export class SqliteKnowledgeStore implements KnowledgeStore {
   private readonly database: DatabaseSync;
@@ -176,12 +210,14 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
   }
 
   sync(documents: KnowledgeDocumentInput[], policies: KnowledgePolicyInput[]): KnowledgeStoreStats {
+    const now = new Date().toISOString();
     const normalizedDocuments = documents.map((document) => ({
       ...document,
       sourcePath: normalizeSourcePath(document.sourcePath),
       title: document.title.trim() || document.sourcePath,
       content: document.content.trim(),
       classification: document.classification ?? this.scope,
+      quality: normalizeQuality(document.quality, "operator", now),
     })).filter((document) => document.content);
     const normalizedPolicies = policies.map((policy) => ({
       sourcePath: normalizeSourcePath(policy.sourcePath),
@@ -189,7 +225,6 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
     })).filter((policy) => policy.content);
     const seenDocumentIds = new Set<string>();
     const seenPolicyIds = new Set<string>();
-    const now = new Date().toISOString();
 
     this.database.exec("BEGIN IMMEDIATE");
     try {
@@ -201,16 +236,22 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
         if (existing?.content_hash === contentHash) continue;
 
         this.database.prepare(`
-          INSERT INTO documents (id, source_path, title, source_kind, classification, content_hash, status, created_at, updated_at)
-          VALUES (?, ?, ?, 'file-import', ?, ?, 'approved', ?, ?)
+          INSERT INTO documents (id, source_path, title, source_kind, classification, content_hash, status, created_at, updated_at, authority, confidence, evidence_count, positive_feedback, negative_feedback, last_validated_at)
+          VALUES (?, ?, ?, 'file-import', ?, ?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             source_path = excluded.source_path,
             title = excluded.title,
             classification = excluded.classification,
             content_hash = excluded.content_hash,
             status = 'approved',
-            updated_at = excluded.updated_at
-        `).run(documentId, document.sourcePath, document.title, document.classification, contentHash, now, now);
+            updated_at = excluded.updated_at,
+            authority = excluded.authority,
+            confidence = excluded.confidence,
+            evidence_count = excluded.evidence_count,
+            positive_feedback = excluded.positive_feedback,
+            negative_feedback = excluded.negative_feedback,
+            last_validated_at = excluded.last_validated_at
+          `).run(documentId, document.sourcePath, document.title, document.classification, contentHash, now, now, document.quality.authority, document.quality.confidence, document.quality.evidenceCount, document.quality.positiveFeedback, document.quality.negativeFeedback, document.quality.lastValidatedAt);
         this.replaceChunks(documentId, document.sourcePath, document.title, document.content);
         this.recordDocumentVersion(documentId, document.content, contentHash, "file-import", now);
         this.audit("document-imported", documentId, document.sourcePath, now);
@@ -258,18 +299,19 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
     const candidates: StoredChunkRow[] = [];
     const terms = ftsTerms(query);
     if (terms) {
-      candidates.push(...this.database.prepare(`
-        SELECT c.id, c.document_id, d.source_path, d.title, c.content
+      const matched = this.database.prepare(`
+        SELECT c.id, c.document_id, d.source_path, d.title, c.content, d.authority, d.confidence, d.evidence_count, d.positive_feedback, d.negative_feedback, d.last_validated_at
         FROM chunk_search
         JOIN chunks c ON c.id = chunk_search.chunk_id
         JOIN documents d ON d.id = c.document_id
         WHERE chunk_search MATCH ? AND d.status = 'approved' AND d.classification != 'restricted'
         ORDER BY rank
         LIMIT ?
-      `).all(terms, maxChunks) as unknown as StoredChunkRow[]);
+      `).all(terms, maxChunks * 4) as unknown as StoredChunkRow[];
+      candidates.push(...matched.map((row, index) => ({ row, index })).sort((left, right) => qualityRank(right.row, right.index) - qualityRank(left.row, left.index)).map((item) => item.row).slice(0, maxChunks));
     }
     candidates.push(...this.database.prepare(`
-      SELECT c.id, c.document_id, d.source_path, d.title, c.content
+      SELECT c.id, c.document_id, d.source_path, d.title, c.content, d.authority, d.confidence, d.evidence_count, d.positive_feedback, d.negative_feedback, d.last_validated_at
       FROM chunks c
       JOIN documents d ON d.id = c.document_id
       WHERE d.status = 'approved' AND d.classification != 'restricted'
@@ -322,6 +364,7 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
       sourcePath,
       ...(input.title?.trim() ? { title: input.title.trim().slice(0, 200) } : {}),
       ...(input.content?.trim() ? { content: input.content.trim() } : {}),
+      ...(input.quality ? { quality: normalizeQuality(input.quality, "autonomous", new Date().toISOString()) } : {}),
     };
     if (input.operation === "upsert" && (!payload.title || !payload.content)) {
       throw new Error("Upsert proposals require a title and content.");
@@ -360,7 +403,7 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
     const now = new Date().toISOString();
     this.database.exec("BEGIN IMMEDIATE");
     try {
-      if (decision === "approve") this.applyProposal(proposal, now);
+      if (decision === "approve") this.applyProposal(proposal, now, reviewedBy);
       const status = decision === "approve" ? "approved" : "rejected";
       this.database.prepare("UPDATE knowledge_proposals SET status = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ?").run(status, now, reviewedBy.trim().slice(0, 120) || "operator", id);
       this.audit(`proposal-${status}`, id, `${proposal.operation}:${proposal.payload.sourcePath}`, now);
@@ -375,7 +418,7 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
   exportSnapshot(scopeId: string): KnowledgeSnapshot {
     const cleanScopeId = normalizeScopeId(scopeId);
     const documentRows = this.database.prepare("SELECT * FROM documents ORDER BY source_path").all() as unknown as StoredDocumentRow[];
-    const versionRows = this.database.prepare("SELECT document_id, content, content_hash, source_kind, created_at FROM document_versions ORDER BY created_at").all() as unknown as StoredVersionRow[];
+    const versionRows = this.database.prepare("SELECT document_id, content, content_hash, source_kind, created_at FROM document_versions ORDER BY created_at, id").all() as unknown as StoredVersionRow[];
     const versionsByDocument = new Map<string, KnowledgeDocumentVersion[]>();
     for (const row of versionRows) {
       const versions = versionsByDocument.get(row.document_id) ?? [];
@@ -383,6 +426,17 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
       versionsByDocument.set(row.document_id, versions);
     }
     const policyRows = this.database.prepare("SELECT * FROM policies ORDER BY source_path").all() as unknown as StoredPolicyRow[];
+    let omittedVersions = 0;
+    const currentHashes = new Map(documentRows.map((document) => [document.id, document.content_hash]));
+    for (const [documentId, versions] of versionsByDocument) {
+      const currentHash = currentHashes.get(documentId);
+      const current = versions.find((version) => version.contentHash === currentHash);
+      const ordered = current ? [...versions.filter((version) => version !== current), current] : versions;
+      omittedVersions += Math.max(0, ordered.length - maxSnapshotVersionsPerDocument);
+      versionsByDocument.set(documentId, ordered.slice(-maxSnapshotVersionsPerDocument));
+    }
+    const allProposals = this.listProposals("all");
+    const proposals = allProposals.slice(0, maxSnapshotProposals);
     return {
       format: "atsla-knowledge-snapshot",
       version: 1,
@@ -399,6 +453,7 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
         contentHash: row.content_hash,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        quality: qualityFromRow(row),
         versions: versionsByDocument.get(row.id) ?? [],
       })),
       policies: policyRows.map((row) => ({
@@ -409,7 +464,13 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
         status: row.status,
         updatedAt: row.updated_at,
       })),
-      proposals: this.listProposals("all"),
+      proposals,
+      compaction: {
+        maxVersionsPerDocument: maxSnapshotVersionsPerDocument,
+        maxProposals: maxSnapshotProposals,
+        omittedVersions,
+        omittedProposals: allProposals.length - proposals.length,
+      },
     };
   }
 
@@ -535,10 +596,23 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
         CREATE INDEX IF NOT EXISTS idx_document_versions_document ON document_versions(document_id, created_at);
         PRAGMA user_version = 2;
       `);
+        version = 2;
+      }
+      if (version < 3) {
+        this.database.exec(`
+          ALTER TABLE documents ADD COLUMN authority TEXT NOT NULL DEFAULT 'operator';
+          ALTER TABLE documents ADD COLUMN confidence REAL NOT NULL DEFAULT 1;
+          ALTER TABLE documents ADD COLUMN evidence_count INTEGER NOT NULL DEFAULT 1;
+          ALTER TABLE documents ADD COLUMN positive_feedback INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE documents ADD COLUMN negative_feedback INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE documents ADD COLUMN last_validated_at TEXT NOT NULL DEFAULT '';
+          CREATE INDEX IF NOT EXISTS idx_documents_quality ON documents(status, confidence, positive_feedback, negative_feedback);
+          PRAGMA user_version = 3;
+        `);
     }
   }
 
-  private applyProposal(proposal: KnowledgeProposal, now: string): void {
+    private applyProposal(proposal: KnowledgeProposal, now: string, reviewedBy: string): void {
     const sourcePath = normalizeSourcePath(proposal.payload.sourcePath);
     assertSafeSourcePath(sourcePath);
     const documentId = stableId(this.scope, sourcePath);
@@ -553,17 +627,31 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
     const content = proposal.payload.content?.trim();
     if (!title || !content) throw new Error("Approved upsert proposals require a title and content.");
     const contentHash = hash(content);
+    const existing = this.database.prepare("SELECT * FROM documents WHERE id = ?").get(documentId) as unknown as StoredDocumentRow | undefined;
+    const normalizedRequestedQuality = normalizeQuality(proposal.payload.quality, reviewedBy === "atsla-autonomous-review" ? "autonomous" : "operator", now);
+    const requestedQuality = reviewedBy === "atsla-autonomous-review"
+      ? normalizedRequestedQuality
+      : { ...normalizedRequestedQuality, authority: "operator" as const, confidence: Math.max(0.95, normalizedRequestedQuality.confidence) };
+    const quality = reviewedBy === "atsla-autonomous-review" && existing
+      ? mergeQuality(qualityFromRow(existing), requestedQuality)
+      : requestedQuality;
     this.database.prepare(`
-      INSERT INTO documents (id, source_path, title, source_kind, classification, content_hash, status, created_at, updated_at)
-      VALUES (?, ?, ?, 'approved-proposal', ?, ?, 'approved', ?, ?)
+      INSERT INTO documents (id, source_path, title, source_kind, classification, content_hash, status, created_at, updated_at, authority, confidence, evidence_count, positive_feedback, negative_feedback, last_validated_at)
+      VALUES (?, ?, ?, 'approved-proposal', ?, ?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         source_kind = 'approved-proposal',
         classification = excluded.classification,
         content_hash = excluded.content_hash,
         status = 'approved',
-        updated_at = excluded.updated_at
-    `).run(documentId, sourcePath, title, this.scope, contentHash, now, now);
+        updated_at = excluded.updated_at,
+        authority = excluded.authority,
+        confidence = excluded.confidence,
+        evidence_count = excluded.evidence_count,
+        positive_feedback = excluded.positive_feedback,
+        negative_feedback = excluded.negative_feedback,
+        last_validated_at = excluded.last_validated_at
+      `).run(documentId, sourcePath, title, this.scope, contentHash, now, now, quality.authority, quality.confidence, quality.evidenceCount, quality.positiveFeedback, quality.negativeFeedback, quality.lastValidatedAt);
     this.replaceChunks(documentId, sourcePath, title, content);
     this.recordDocumentVersion(documentId, content, contentHash, "approved-proposal", now);
   }
@@ -573,8 +661,8 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
     const currentVersion = document.versions.find((version) => version.contentHash === document.contentHash) ?? document.versions.at(-1);
     if (!currentVersion) throw new Error(`Knowledge document ${document.sourcePath} has no content version.`);
     this.database.prepare(`
-      INSERT INTO documents (id, source_path, title, source_kind, classification, content_hash, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO documents (id, source_path, title, source_kind, classification, content_hash, status, created_at, updated_at, authority, confidence, evidence_count, positive_feedback, negative_feedback, last_validated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         source_path = excluded.source_path,
         title = excluded.title,
@@ -583,8 +671,14 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
         content_hash = excluded.content_hash,
         status = excluded.status,
         created_at = excluded.created_at,
-        updated_at = excluded.updated_at
-    `).run(document.id, document.sourcePath, document.title, document.sourceKind, document.classification, document.contentHash, document.status, document.createdAt, document.updatedAt);
+        updated_at = excluded.updated_at,
+        authority = excluded.authority,
+        confidence = excluded.confidence,
+        evidence_count = excluded.evidence_count,
+        positive_feedback = excluded.positive_feedback,
+        negative_feedback = excluded.negative_feedback,
+        last_validated_at = excluded.last_validated_at
+      `).run(document.id, document.sourcePath, document.title, document.sourceKind, document.classification, document.contentHash, document.status, document.createdAt, document.updatedAt, ...qualityValues(normalizeQuality(document.quality, document.sourceKind === "seed" ? "seed" : "operator", document.updatedAt)));
     this.replaceChunks(document.id, document.sourcePath, document.title, currentVersion.content);
     for (const version of document.versions) this.recordDocumentVersion(document.id, version.content, version.contentHash, version.sourceKind, version.createdAt);
   }
@@ -627,6 +721,62 @@ function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function normalizeQuality(input: Partial<KnowledgeQuality> | undefined, fallbackAuthority: KnowledgeAuthority, fallbackTime: string): KnowledgeQuality {
+  const authority = input?.authority === "seed" || input?.authority === "operator" || input?.authority === "autonomous"
+    ? input.authority
+    : fallbackAuthority;
+  return {
+    authority,
+    confidence: clampNumber(input?.confidence, authority === "autonomous" ? 0.5 : 1, 0, 1),
+    evidenceCount: Math.round(clampNumber(input?.evidenceCount, 1, 1, 1_000)),
+    positiveFeedback: Math.round(clampNumber(input?.positiveFeedback, 0, 0, 1_000)),
+    negativeFeedback: Math.round(clampNumber(input?.negativeFeedback, 0, 0, 1_000)),
+    lastValidatedAt: typeof input?.lastValidatedAt === "string" && !Number.isNaN(Date.parse(input.lastValidatedAt)) ? input.lastValidatedAt : fallbackTime,
+  };
+}
+
+function qualityFromRow(row: StoredDocumentRow | StoredChunkRow): KnowledgeQuality {
+  return normalizeQuality({
+    authority: row.authority,
+    confidence: row.confidence,
+    evidenceCount: row.evidence_count,
+    positiveFeedback: row.positive_feedback,
+    negativeFeedback: row.negative_feedback,
+    lastValidatedAt: row.last_validated_at,
+  }, "operator", row.last_validated_at || new Date(0).toISOString());
+}
+
+function qualityValues(quality: KnowledgeQuality): [KnowledgeAuthority, number, number, number, number, string] {
+  return [quality.authority, quality.confidence, quality.evidenceCount, quality.positiveFeedback, quality.negativeFeedback, quality.lastValidatedAt];
+}
+
+function mergeQuality(existing: KnowledgeQuality, incoming: KnowledgeQuality): KnowledgeQuality {
+  const evidenceCount = Math.min(1_000, existing.evidenceCount + incoming.evidenceCount);
+  const confidence = ((existing.confidence * existing.evidenceCount) + (incoming.confidence * incoming.evidenceCount)) / evidenceCount;
+  return {
+    authority: existing.authority === "seed" || existing.authority === "operator" ? existing.authority : incoming.authority,
+    confidence: Math.min(0.99, confidence),
+    evidenceCount,
+    positiveFeedback: Math.min(1_000, existing.positiveFeedback + incoming.positiveFeedback),
+    negativeFeedback: Math.min(1_000, existing.negativeFeedback + incoming.negativeFeedback),
+    lastValidatedAt: existing.lastValidatedAt > incoming.lastValidatedAt ? existing.lastValidatedAt : incoming.lastValidatedAt,
+  };
+}
+
+function qualityRank(row: StoredChunkRow, lexicalIndex: number): number {
+  const quality = qualityFromRow(row);
+  const authority = quality.authority === "seed" ? 0.7 : quality.authority === "operator" ? 0.6 : 0;
+  const evidence = Math.min(0.6, Math.log2(quality.evidenceCount + 1) * 0.12);
+  const outcomes = Math.max(-0.8, Math.min(0.5, (quality.positiveFeedback * 0.08) - (quality.negativeFeedback * 0.2)));
+  const ageDays = Math.max(0, (Date.now() - Date.parse(quality.lastValidatedAt)) / 86_400_000);
+  const freshness = Number.isFinite(ageDays) ? Math.max(0, 0.3 - ageDays / 1_825) : 0;
+  return (4 / (lexicalIndex + 1)) + quality.confidence + authority + evidence + outcomes + freshness;
+}
+
+function clampNumber(value: number | undefined, fallback: number, minimum: number, maximum: number): number {
+  return Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, Number(value))) : fallback;
+}
+
 function normalizeSourcePath(value: string): string {
   return value.replaceAll("\\", "/").replace(/^\.\//, "");
 }
@@ -666,6 +816,7 @@ function validateSnapshot(snapshot: KnowledgeSnapshot, expectedScope: KnowledgeS
     if (document.classification !== "public" && document.classification !== "client" && document.classification !== "restricted") throw new Error("Invalid knowledge document classification.");
     if (document.status !== "approved" && document.status !== "retired") throw new Error("Invalid knowledge document status.");
     if (!document.versions.length) throw new Error(`Knowledge document ${document.sourcePath} has no versions.`);
+    if (document.quality) normalizeQuality(document.quality, "operator", document.updatedAt);
   }
   for (const policy of snapshot.policies) assertSafeSourcePath(policy.sourcePath);
   for (const proposal of snapshot.proposals) {

@@ -22,6 +22,7 @@ export class SessionStore {
       createdAt: now,
       updatedAt: now,
       greetingSent: false,
+      status: "active",
       transcript: [],
       drafts: [],
       activity: [],
@@ -68,6 +69,8 @@ export class SessionStore {
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
             greetingSent: session.greetingSent,
+            status: session.status,
+            resolution: session.completion?.resolution,
             transcriptEvents: session.transcript.length,
           }];
         } catch {
@@ -99,6 +102,8 @@ function normalizeSession(session: Partial<MeetingSession>): MeetingSession {
     createdAt: String(session.createdAt ?? new Date().toISOString()),
     updatedAt: String(session.updatedAt ?? session.createdAt ?? new Date().toISOString()),
     greetingSent: Boolean(session.greetingSent),
+    status: session.status === "awaiting-feedback" || session.status === "completed" ? session.status : "active",
+    ...(session.completion && typeof session.completion === "object" ? { completion: session.completion } : {}),
     transcript: Array.isArray(session.transcript) ? session.transcript : [],
     drafts: Array.isArray(session.drafts) ? session.drafts : [],
     activity: Array.isArray(session.activity) ? session.activity : [],

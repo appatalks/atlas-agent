@@ -71,6 +71,8 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain("data-settings-tab=\"voice\"");
     expect(dashboard.body).toContain('id="ttsEngineUrl"');
     expect(dashboard.body).toContain('id="copilotReasoningEffort"');
+    expect(dashboard.body).toContain('id="autonomousLearningEnabled"');
+    expect(dashboard.body).toContain('id="customerFeedbackEnabled"');
     expect(dashboard.body).toContain("Higher levels can increase latency and premium usage");
     expect(dashboard.body).toContain("data-settings-tab=\"appearance\"");
     expect(dashboard.body).toContain("appearanceTheme");
@@ -97,6 +99,9 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain("session-rename-input");
     expect(dashboard.body).not.toContain("window.prompt('Rename session'");
     expect(dashboard.body).toContain("Writing meeting summary...");
+    expect(dashboard.body).toContain('id="finishSession"');
+    expect(dashboard.body).toContain("Ask feedback & finish");
+    expect(dashboard.body).toContain("/v1/sessions/complete");
     expect(dashboard.body).toContain("Pending knowledge proposals");
     expect(dashboard.body).toContain("/v1/knowledge/");
     expect(dashboard.body).toContain('id="knowledgeBackend"');
@@ -186,6 +191,24 @@ describe("HTTP control plane", () => {
     const session = await server.inject({ method: "POST", url: "/v1/sessions", payload: { title: "Unknown caller" } });
     expect(session.statusCode).toBe(200);
     expect(session.json().session).toMatchObject({ clientId: "public-knowledge-only", clientWorkspace: "" });
+  });
+
+  it("requests customer feedback and completes a support session", async () => {
+    const server = buildServer();
+    servers.push(server);
+    await server.inject({ method: "POST", url: "/v1/client-workspace", payload: { name: "Completion Client" } });
+    await server.inject({ method: "POST", url: "/v1/context/load" });
+    const created = (await server.inject({ method: "POST", url: "/v1/sessions", payload: { title: "Completion flow" } })).json().session;
+    expect(created.status).toBe("active");
+
+    const requested = await server.inject({ method: "POST", url: "/v1/sessions/complete", payload: { requestFeedback: true } });
+    expect(requested.statusCode).toBe(200);
+    expect(requested.json()).toMatchObject({ awaitingFeedback: true, session: { status: "awaiting-feedback" } });
+
+    const completed = await server.inject({ method: "POST", url: "/v1/sessions/complete", payload: {} });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.json()).toMatchObject({ awaitingFeedback: false, session: { status: "completed", completion: { resolution: "unresolved" } } });
+    expect((await server.inject({ method: "GET", url: "/v1/sessions" })).json().sessions[0]).toMatchObject({ status: "completed", resolution: "unresolved" });
   });
 
   it("explicitly loads and clears only the selected client context", async () => {
