@@ -11,11 +11,13 @@ describe("installation entry points", () => {
 
     expect(page).toContain("ATLAS | Live Agentic Support");
     expect(page).toContain('src="docs/atlas-agent-splash.png"');
+    expect(page).toContain('href="docs/favicon.svg"');
     expect(page).toContain('href="#main"');
     expect(page).toContain("prefers-reduced-motion: reduce");
     expect(page).toContain("https://raw.githubusercontent.com/appatalks/atlas-agent/main/get-atlas.sh");
     expect(page).toContain("https://appatalks.github.io/eva-agent/");
     expect(packageMetadata.homepage).toBe("https://appatalks.github.io/atlas-agent/");
+    expect(existsSync(`${root}/docs/favicon.svg`)).toBe(true);
   });
 
   it("provides a curl bootstrap and a durable atlas launcher", () => {
