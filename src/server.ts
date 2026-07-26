@@ -19,6 +19,8 @@ const responseModes: ResponseMode[] = ["disabled", "suggest", "approval", "guard
 const knowledgeScopes: KnowledgeScope[] = ["client", "public"];
 const knowledgeProposalStatuses: Array<KnowledgeProposal["status"] | "all"> = ["pending", "approved", "rejected", "all"];
 const knowledgeProposalOperations: KnowledgeProposalOperation[] = ["upsert", "retire"];
+const statusRateLimit = { max: 600, timeWindow: "1 minute" } as const;
+const filesystemRateLimit = { max: 120, timeWindow: "1 minute" } as const;
 
 async function isReachable(endpoint: URL | undefined, authToken?: string): Promise<boolean> {
   if (!endpoint) return false;
@@ -106,7 +108,7 @@ export function buildServer() {
     try { return coordinator.selectClientWorkspace(request.body); }
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "Client selection failed." }); }
   });
-  app.get("/v1/client-workspace/status", async () => coordinator.workspaceStatus());
+  app.get("/v1/client-workspace/status", { config: { rateLimit: filesystemRateLimit } }, async () => coordinator.workspaceStatus());
   app.get("/v1/client-workspace/knowledge-route", async () => ({ route: coordinator.clientKnowledgeRoute() }));
   app.put<{ Body: { database?: string; supplementaryContextPath?: string } }>("/v1/client-workspace/knowledge-route", async (request, reply) => {
     if (typeof request.body.database !== "string") return reply.code(400).send({ error: "database is required." });
@@ -246,7 +248,7 @@ export function buildServer() {
     try { return await coordinator.speakTemplate(request.body.text); }
     catch (error) { return reply.code(500).send({ error: error instanceof Error ? error.message : "Template speech failed." }); }
   });
-  app.get("/v1/audio/status", { config: { rateLimit: false } }, async () => audio.status());
+  app.get("/v1/audio/status", { config: { rateLimit: statusRateLimit } }, async () => audio.status());
   app.post("/v1/audio/start", async (_request, reply) => {
     try { return { output: await audio.start() }; }
     catch (error) { return reply.code(403).send({ error: error instanceof Error ? error.message : "Audio start failed." }); }

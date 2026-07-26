@@ -1,7 +1,7 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { type ResponseMode } from "./domain.js";
 import { parseAdxPortalTarget, validateAdxDatabaseName, type AdxAuthMode } from "./adx-knowledge.js";
 import { KnowledgeBackendCoordinator, type AdxRepositoryFactory, type KnowledgeBackendConfig, type KnowledgeBackendKind, type KnowledgeSyncResult } from "./knowledge-backend.js";
@@ -681,7 +681,8 @@ export class ClientWorkspace {
   }
 
   private ensureClientProfile(folder: string, requestedName?: string): ClientProfileRecord {
-    const profilePath = join(folder, "client-profile.json");
+    const selected = this.safePath(folder, true);
+    const profilePath = join(selected, "client-profile.json");
     let profile: Record<string, unknown> = {};
     try { profile = JSON.parse(readFileSync(profilePath, "utf8")) as Record<string, unknown>; } catch {}
     let changed = false;
@@ -690,7 +691,7 @@ export class ClientWorkspace {
       changed = true;
     }
     if (typeof profile.name !== "string" || !profile.name.trim()) {
-      profile.name = requestedName?.trim() || basename(folder);
+      profile.name = requestedName?.trim() || basename(selected);
       changed = true;
     }
     if (typeof profile.knowledgeDatabase !== "string") {
@@ -731,9 +732,9 @@ export class ClientWorkspace {
   }
 
   private safePath(value: string, allowApprovedRoot = false): string {
-    const folder = resolve(value);
-    const configuredRoot = resolve(this.defaultRoot);
-    const allowedRoots = [resolve(homedir()), configuredRoot, resolve(configuredRoot, "..")];
+    const folder = canonicalProspectivePath(value);
+    const configuredRoot = canonicalProspectivePath(this.defaultRoot);
+    const allowedRoots = [realpathSync(homedir()), configuredRoot, canonicalProspectivePath(resolve(configuredRoot, ".."))];
     if (!allowedRoots.some((root) => isPathWithin(root, folder, allowApprovedRoot))) {
       throw new Error("Workspace paths must be inside your home directory or the configured client workspace root.");
     }
@@ -961,6 +962,18 @@ function localKnowledgeBackendConfig(): KnowledgeBackendConfig {
 function isPathWithin(root: string, path: string, allowRoot: boolean): boolean {
   const pathFromRoot = relative(root, path);
   return (allowRoot || Boolean(pathFromRoot)) && !pathFromRoot.startsWith("..") && !pathFromRoot.startsWith("/");
+}
+
+function canonicalProspectivePath(value: string): string {
+  let existing = resolve(value);
+  const suffix: string[] = [];
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) throw new Error("Workspace path has no accessible parent directory.");
+    suffix.unshift(basename(existing));
+    existing = parent;
+  }
+  return resolve(realpathSync(existing), ...suffix);
 }
 
 function walk(folder: string): string[] {

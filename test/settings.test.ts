@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -56,6 +56,15 @@ describe("client workspace", () => {
     const workspace = new ClientWorkspace(root);
 
     expect(() => workspace.select({ path: "/etc/voice-bridge-client" })).toThrow("Workspace paths must be inside");
+  });
+
+  it("rejects workspace symlinks that escape the approved root", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-client-symlink-"));
+    folders.push(root);
+    symlinkSync("/etc", join(root, "escaped"));
+    const workspace = new ClientWorkspace(join(root, "clients"));
+
+    expect(() => workspace.select({ path: join(root, "escaped", "atlas-client") })).toThrow("Workspace paths must be inside");
   });
 
   it("persists an explicit ADX route against the stable client identity", () => {

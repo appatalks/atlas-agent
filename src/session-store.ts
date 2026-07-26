@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { type MeetingSession, type MeetingSessionSummary } from "./domain.js";
 
@@ -85,10 +85,11 @@ export class SessionStore {
   }
 
   private path(id: string): string {
-    if (!/^[a-zA-Z0-9-]+$/.test(id)) throw new Error("Invalid session identifier.");
-    const path = resolve(this.root, `${id}.json`);
-    if (!isChildPath(this.root, path)) throw new Error("Invalid session path.");
-    return path;
+    const fileId = basename(id);
+    if (fileId !== id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(fileId)) {
+      throw new Error("Invalid session identifier.");
+    }
+    return join(this.root, `${fileId}.json`);
   }
 }
 
@@ -111,11 +112,6 @@ function normalizeSession(session: Partial<MeetingSession>): MeetingSession {
   };
 }
 
-function isChildPath(root: string, path: string): boolean {
-  const pathFromRoot = relative(root, path);
-  return Boolean(pathFromRoot) && !pathFromRoot.startsWith("..") && !pathFromRoot.startsWith("/");
-}
-
 function isSessionFileName(name: string): boolean {
-  return /^[a-zA-Z0-9-]+\.json$/.test(name);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i.test(name);
 }

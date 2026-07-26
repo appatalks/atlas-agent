@@ -10,6 +10,17 @@ import { SimulatedSpeechOutput } from "../src/voice.js";
 import { ClientWorkspace } from "../src/settings.js";
 
 describe("persistent meeting sessions", () => {
+  it("rejects traversal and non-UUID session identifiers", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-session-paths-"));
+    try {
+      const sessions = new SessionStore(root);
+      expect(() => sessions.get("../settings")).toThrow("Invalid session identifier");
+      expect(() => sessions.get("not-a-session-id")).toThrow("Invalid session identifier");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("greets once, persists conversation state, and restores a selected session", async () => {
     const root = mkdtempSync(join(tmpdir(), "voice-bridge-sessions-"));
     try {

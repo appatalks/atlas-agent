@@ -70,6 +70,19 @@ describe("HTTP control plane", () => {
     expect(response.statusCode).toBe(429);
   });
 
+  it("rate-limits filesystem and system-command status routes", async () => {
+    const server = buildServer();
+    servers.push(server);
+
+    let workspaceStatus = await server.inject({ method: "GET", url: "/v1/client-workspace/status" });
+    for (let attempt = 0; attempt < 120; attempt += 1) workspaceStatus = await server.inject({ method: "GET", url: "/v1/client-workspace/status" });
+    expect(workspaceStatus.statusCode).toBe(429);
+
+    let audioStatus = await server.inject({ method: "GET", url: "/v1/audio/status" });
+    for (let attempt = 0; attempt < 600; attempt += 1) audioStatus = await server.inject({ method: "GET", url: "/v1/audio/status" });
+    expect(audioStatus.statusCode).toBe(429);
+  });
+
   it("serves the local simulation dashboard and model profiles", async () => {
     const server = buildServer();
     servers.push(server);

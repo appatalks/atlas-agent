@@ -108,6 +108,28 @@ describe("voice expression controls", () => {
       cfgWeight: 0.3,
     });
   });
+
+  it("preserves Eva's character instructions and distinct voice end to end", async () => {
+    let modelQuestion = "";
+    const provider = {
+      id: "local-qwen" as const,
+      complete: async (request: { question: string }) => {
+        modelQuestion = request.question;
+        return { text: "I am here. What is on your mind?", provider: "local-qwen" as const, model: "test" };
+      },
+    };
+    const speech = new CapturingSpeechOutput();
+    const coordinator = new MeetingCoordinator(provider, new ResponsePolicy("approval"), new DraftStore(), speech);
+
+    coordinator.updateSettings({ voiceProfile: "Eva" });
+    const { draft } = await coordinator.draft("Respond to the client as yourself.");
+    await coordinator.authorize(draft.id);
+
+    expect(modelQuestion).toContain("Voice profile: Eva");
+    expect(modelQuestion).toContain("warm, curious, and genuine personal AI assistant");
+    expect(modelQuestion).toContain("thoughtful, knowledgeable friend");
+    expect(speech.lastOptions).toMatchObject({ profileId: "eva", exaggeration: 0.55, cfgWeight: 0.4 });
+  });
 });
 
 describe("autonomous meeting replies", () => {
