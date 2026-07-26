@@ -40,7 +40,7 @@ has_speech_level() {
 if [[ "${1:-}" == "--help" ]]; then usage; exit 0; fi
 if [[ "${1:-}" == "--check" ]]; then check; exit $?; fi
 if [[ "${1:-}" == "--dry-run" ]]; then
-  printf 'ffmpeg -f pulse -i %q -ar 16000 -ac 1 -f segment -segment_time %q ...\n' "$SOURCE" "$SEGMENT_SECONDS"
+  printf 'ffmpeg -nostdin -f pulse -i %q -ar 16000 -ac 1 -f segment -segment_time %q ...\n' "$SOURCE" "$SEGMENT_SECONDS"
   printf '%q -m %q -f chunk.wav -nt\n' "$WHISPER_BIN" "$WHISPER_MODEL"
   printf 'curl POST %s/v1/transcripts with speaker=remote\n' "$API_URL"
   exit 0
@@ -60,16 +60,22 @@ deliver_pending() {
   pending_text=""
 }
 
-trap 'deliver_pending; kill "${CAPTURE_PID:-}" >/dev/null 2>&1 || true' EXIT INT TERM
+CAPTURE_PID=""
+capture_generation=0
+segment_list=""
 
-ffmpeg -hide_banner -loglevel error -f pulse -i "$SOURCE" -ar 16000 -ac 1 -f segment \
-  -segment_time "$SEGMENT_SECONDS" -reset_timestamps 1 -segment_list "$WORK_DIR/segments.csv" \
-  -segment_list_type csv "$WORK_DIR/chunk-%08d.wav" &
-CAPTURE_PID=$!
-echo "Capturing $SOURCE. Send SIGINT to stop."
+start_capture() {
+  ((capture_generation += 1))
+  segment_list="$WORK_DIR/segments-$capture_generation.csv"
+  ffmpeg -nostdin -hide_banner -loglevel error -f pulse -i "$SOURCE" -ar 16000 -ac 1 -f segment \
+    -segment_time "$SEGMENT_SECONDS" -reset_timestamps 1 -segment_list "$segment_list" \
+    -segment_list_type csv "$WORK_DIR/chunk-$capture_generation-%08d.wav" &
+  CAPTURE_PID=$!
+  echo "Capturing $SOURCE (generation $capture_generation, PID $CAPTURE_PID)."
+}
 
-while kill -0 "$CAPTURE_PID" >/dev/null 2>&1; do
-  if [[ -f "$WORK_DIR/segments.csv" ]]; then
+process_segments() {
+  if [[ -f "$segment_list" ]]; then
     while IFS=, read -r chunk _; do
       chunk="${chunk#\"}"
       chunk="${chunk%\"}"
@@ -81,12 +87,30 @@ while kill -0 "$CAPTURE_PID" >/dev/null 2>&1; do
         deliver_pending
         continue
       fi
-      text="$($WHISPER_BIN -m "$WHISPER_MODEL" -f "$chunk" -nt 2>/dev/null | sed '/^$/d' | tr '\n' ' ')"
+      if ! text="$($WHISPER_BIN -m "$WHISPER_MODEL" -f "$chunk" -nt 2>/dev/null | sed '/^$/d' | tr '\n' ' ')"; then
+        echo "Whisper failed for $chunk; continuing capture." >&2
+        printf '%s\n' "$chunk" >> "$WORK_DIR/processed.txt"
+        continue
+      fi
       printf '%s\n' "$chunk" >> "$WORK_DIR/processed.txt"
       text="$(printf '%s' "$text" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
       [[ -n "$text" ]] || continue
       pending_text="${pending_text:+$pending_text }$text"
-    done < "$WORK_DIR/segments.csv"
+    done < "$segment_list"
   fi
-  read -r -t 0.25 _ || true
+}
+
+trap 'deliver_pending; kill "${CAPTURE_PID:-}" >/dev/null 2>&1 || true' EXIT INT TERM
+
+while true; do
+  start_capture
+  while kill -0 "$CAPTURE_PID" >/dev/null 2>&1; do
+    process_segments
+    read -r -t 0.25 _ || true
+  done
+  process_segments
+  if wait "$CAPTURE_PID"; then capture_status=0; else capture_status=$?; fi
+  deliver_pending
+  echo "Conference capture exited with status $capture_status; restarting." >&2
+  read -r -t 1 _ || true
 done

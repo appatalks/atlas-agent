@@ -171,7 +171,16 @@ stop() {
 status() {
   if is_running "$SUPERVISOR_PID_FILE"; then
     echo "running (supervisor PID $(<"$SUPERVISOR_PID_FILE"))"
-    for file in "$PID_DIR"/*.pid; do [[ -f "$file" ]] && printf '%s: %s\n' "$(basename "$file" .pid)" "$(<"$file")"; done
+    for file in "$PID_DIR"/*.pid; do
+      [[ -f "$file" ]] || continue
+      local name="$(basename "$file" .pid)"
+      local pid="$(<"$file")"
+      if kill -0 "$pid" >/dev/null 2>&1; then
+        printf '%s: %s\n' "$name" "$pid"
+      else
+        printf '%s: stopped (stale PID %s)\n' "$name" "$pid"
+      fi
+    done
   else
     echo "stopped"
   fi

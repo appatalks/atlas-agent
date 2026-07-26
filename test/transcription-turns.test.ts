@@ -14,5 +14,9 @@ describe("transcription turn assembly", () => {
     expect(script).toContain("deliver_pending\n        continue");
     expect(script).toContain('pending_text="${pending_text:+$pending_text }$text"');
     expect(script).toContain("trap 'deliver_pending;");
+    expect(script).toContain("ffmpeg -nostdin");
+    expect(script).toContain("start_capture() {");
+    expect(script).toContain("Conference capture exited with status $capture_status; restarting.");
+    expect(script).toContain("Whisper failed for $chunk; continuing capture.");
   });
 });
