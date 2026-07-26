@@ -117,17 +117,20 @@ describe("autonomous meeting replies", () => {
   });
 });
 
-describe("ATSLA identity", () => {
-  it("answers the ATSLA expansion deterministically, including spelled-out speech", async () => {
+describe("ATLAS identity", () => {
+  it("answers the ATLAS expansion deterministically, including spelled-out speech", async () => {
     let calls = 0;
     const provider = { id: "local-qwen" as const, complete: async () => { calls += 1; return { text: "Incorrect expansion", provider: "local-qwen" as const, model: "test" }; } };
     const coordinator = new MeetingCoordinator(provider, new ResponsePolicy("approval"), new DraftStore(), new SimulatedSpeechOutput());
 
-    await coordinator.ingest({ id: "atsla", speaker: "remote", text: "What does A-T-S-L-A mean?", occurredAt: new Date().toISOString() });
+    await coordinator.ingest({ id: "atlas", speaker: "remote", text: "What does A-T-L-A-S mean?", occurredAt: new Date().toISOString() });
     const result = await coordinator.respondToConversation("");
 
-    expect(result.draft.reply).toMatchObject({ text: "ATSLA means AppaTalks Support Live Agent.", model: "atsla-identity" });
+    expect(result.draft.reply).toMatchObject({ text: "ATLAS means AppaTalks Live Agentic Support.", model: "atlas-identity" });
     expect(calls).toBe(0);
+
+    await coordinator.ingest({ id: "legacy-name", speaker: "remote", text: "What did A-T-S-L-A mean?", occurredAt: new Date().toISOString() });
+    expect((await coordinator.draft("Answer the naming question.")).draft.reply.text).toBe("ATLAS means AppaTalks Live Agentic Support.");
   });
 });
 
@@ -189,7 +192,7 @@ describe("live representative escalation", () => {
 });
 
 describe("network provider contracts", () => {
-  it("allows ATSLA's full guarded context budget through the local Qwen bridge", () => {
+  it("allows ATLAS's full guarded context budget through the local Qwen bridge", () => {
     const bridge = readFileSync(new URL("../tools/qwen_bridge.py", import.meta.url), "utf8");
     expect(bridge).toContain("max_length=60_000");
   });
@@ -225,7 +228,7 @@ describe("network provider contracts", () => {
     expect(receivedPayload.acp_model).toBe("claude-sonnet-4.6");
     expect(receivedPayload.acp_reasoning_effort).toBe("high");
     expect((receivedPayload.messages as Array<{ role: string; content: string }>)[0].content).toContain("You are AppaTalks");
-    expect((receivedPayload.messages as Array<{ role: string; content: string }>)[0].content).toContain("ATSLA means AppaTalks Support Live Agent");
+    expect((receivedPayload.messages as Array<{ role: string; content: string }>)[0].content).toContain("ATLAS means AppaTalks Live Agentic Support");
     expect(reply.text).toBe("Copilot reply");
   });
 
@@ -251,7 +254,7 @@ describe("network provider contracts", () => {
 
     expect(receivedPayload.model).toBe("qwen3-8b");
     expect((receivedPayload.messages as Array<{ role: string; content: string }>)[0].content).toContain("You are AppaTalks");
-    expect((receivedPayload.messages as Array<{ role: string; content: string }>)[0].content).toContain("ATSLA means AppaTalks Support Live Agent");
+    expect((receivedPayload.messages as Array<{ role: string; content: string }>)[0].content).toContain("ATLAS means AppaTalks Live Agentic Support");
     expect(reply.provider).toBe("local-qwen");
     expect(reply.model).toBe("Qwen/Qwen3-8B");
     expect(reply.usage).toMatchObject({ promptTokens: 20, completionTokens: 5, totalTokens: 25, tokensPerSecond: 10, exact: true });

@@ -189,7 +189,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--eva-reference", type=Path)
-    parser.add_argument("--cache-dir", type=Path, default=Path.home() / ".cache" / "atsla" / "greetings")
+    parser.add_argument("--cache-dir", type=Path, default=Path.home() / ".cache" / "atlas" / "greetings")
     parser.add_argument("--seed-audio", type=Path)
     parser.add_argument("--seed-reference-sha256", default="")
     parser.add_argument("--warm-text", default="")

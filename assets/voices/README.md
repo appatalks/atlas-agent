@@ -1,6 +1,6 @@
 # Voice References
 
-This folder contains ATSLA voice reference WAV files.
+This folder contains ATLAS voice reference WAV files.
 
 - `appatalks-voice.wav` is the default AppaTalks reference.
 - `eva-voice.wav` is the bundled Eva reference.

@@ -7,7 +7,7 @@ import { SqliteKnowledgeStore } from "../src/knowledge-store.js";
 
 describe("SQLite knowledge store", () => {
   it("imports versioned source content, recalls approved chunks, and keeps policies separate", () => {
-    const root = mkdtempSync(join(tmpdir(), "atsla-knowledge-store-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-knowledge-store-"));
     const store = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
     try {
       const initial = store.sync([
@@ -37,7 +37,7 @@ describe("SQLite knowledge store", () => {
   });
 
   it("cannot recall one client's canary from another physical database", () => {
-    const root = mkdtempSync(join(tmpdir(), "atsla-knowledge-isolation-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-knowledge-isolation-"));
     const clientA = new SqliteKnowledgeStore("client", join(root, "client-a.sqlite"));
     const clientB = new SqliteKnowledgeStore("client", join(root, "client-b.sqlite"));
     try {
@@ -56,7 +56,7 @@ describe("SQLite knowledge store", () => {
   });
 
   it("applies only approved proposals and retains document versions", () => {
-    const root = mkdtempSync(join(tmpdir(), "atsla-knowledge-proposals-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-knowledge-proposals-"));
     const databasePath = join(root, "client.sqlite");
     const store = new SqliteKnowledgeStore("client", databasePath);
     try {
@@ -109,7 +109,7 @@ describe("SQLite knowledge store", () => {
   });
 
   it("weights evidence-backed autonomous knowledge without treating repetition as authority", () => {
-    const root = mkdtempSync(join(tmpdir(), "atsla-knowledge-quality-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-knowledge-quality-"));
     const store = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
     try {
       const weak = store.createProposal({
@@ -120,7 +120,7 @@ describe("SQLite knowledge store", () => {
         evidenceSessionId: "session-weak",
         quality: { authority: "autonomous", confidence: 0.7, evidenceCount: 1, negativeFeedback: 1 },
       });
-      store.reviewProposal(weak.id, "approve", "atsla-autonomous-review");
+      store.reviewProposal(weak.id, "approve", "atlas-autonomous-review");
       const strong = store.createProposal({
         operation: "upsert",
         sourcePath: "learned/verified-reset.md",
@@ -129,7 +129,7 @@ describe("SQLite knowledge store", () => {
         evidenceSessionId: "session-strong",
         quality: { authority: "autonomous", confidence: 0.96, evidenceCount: 3, positiveFeedback: 1 },
       });
-      store.reviewProposal(strong.id, "approve", "atsla-autonomous-review");
+      store.reviewProposal(strong.id, "approve", "atlas-autonomous-review");
 
       expect(store.recall("reset procedure gateway", { maxChunks: 1 })[0].content).toContain("verified reset");
       const snapshot = store.exportSnapshot("quality-client");
@@ -159,7 +159,7 @@ describe("SQLite knowledge store", () => {
   });
 
   it("round-trips a portable snapshot across physical databases", () => {
-    const root = mkdtempSync(join(tmpdir(), "atsla-knowledge-snapshot-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-knowledge-snapshot-"));
     const sourcePath = join(root, "source.sqlite");
     const targetPath = join(root, "target.sqlite");
     const source = new SqliteKnowledgeStore("client", sourcePath);
@@ -186,7 +186,7 @@ describe("SQLite knowledge store", () => {
 
       const snapshot = source.exportSnapshot("northwind-client");
       expect(snapshot).toMatchObject({
-        format: "atsla-knowledge-snapshot",
+        format: "atlas-knowledge-snapshot",
         version: 1,
         scope: "client",
         scopeId: "northwind-client",
@@ -208,7 +208,7 @@ describe("SQLite knowledge store", () => {
   });
 
   it("compacts portable version history while retaining the current state", () => {
-    const root = mkdtempSync(join(tmpdir(), "atsla-knowledge-compaction-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-knowledge-compaction-"));
     const store = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
     try {
       for (let version = 1; version <= 25; version += 1) {
@@ -220,7 +220,7 @@ describe("SQLite knowledge store", () => {
           evidenceSessionId: `session-${version}`,
           quality: { authority: "autonomous", confidence: 0.95, evidenceCount: 1, positiveFeedback: 1 },
         });
-        store.reviewProposal(proposal.id, "approve", "atsla-autonomous-review");
+        store.reviewProposal(proposal.id, "approve", "atlas-autonomous-review");
       }
 
       const snapshot = store.exportSnapshot("compaction-client");

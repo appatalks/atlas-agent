@@ -48,7 +48,7 @@ const demos: DemoSeed[] = [
 ## Sensitive Or Restricted
 
 - Never request or disclose full payment card data, CVV, bank account or routing numbers, authentication codes, settlement instructions, credentials, or restricted records.
-- Never identify or discuss another ATSLA client, including Healthcare Demo 2.
+- Never identify or discuss another ATLAS client, including Healthcare Demo 2.
 
 ## Required Behavior
 
@@ -93,7 +93,7 @@ const demos: DemoSeed[] = [
 ## Sensitive Or Restricted
 
 - Never request or disclose diagnoses, clinical notes, medical record contents, insurance identifiers, authentication codes, credentials, or restricted records.
-- Never identify or discuss another ATSLA client, including Fintech Demo 1.
+- Never identify or discuss another ATLAS client, including Fintech Demo 1.
 
 ## Required Behavior
 
@@ -137,7 +137,7 @@ function policy(scopeId: string, content: string, now: string): PortableKnowledg
 function snapshot(seed: DemoSeed): KnowledgeSnapshot {
   const now = new Date().toISOString();
   return {
-    format: "atsla-knowledge-snapshot",
+    format: "atlas-knowledge-snapshot",
     version: 1,
     scope: "client",
     scopeId: seed.id,
@@ -149,14 +149,14 @@ function snapshot(seed: DemoSeed): KnowledgeSnapshot {
 }
 
 async function main(): Promise<void> {
-  const clusterInput = process.env.ATSLA_ADX_CLUSTER_URL?.trim();
-  if (!clusterInput) throw new Error("ATSLA_ADX_CLUSTER_URL is required.");
+  const clusterInput = (process.env.ATLAS_ADX_CLUSTER_URL ?? process.env.ATSLA_ADX_CLUSTER_URL)?.trim();
+  if (!clusterInput) throw new Error("ATLAS_ADX_CLUSTER_URL is required.");
   const target = parseAdxPortalTarget(clusterInput);
-  const authMode = (process.env.ATSLA_ADX_AUTH_MODE?.trim() || "device-code") as AdxAuthMode;
+  const authMode = ((process.env.ATLAS_ADX_AUTH_MODE ?? process.env.ATSLA_ADX_AUTH_MODE)?.trim() || "device-code") as AdxAuthMode;
   const repository = new AdxKnowledgeRepository({
     clusterUrl: target.clusterUrl,
     authMode,
-    tenantId: process.env.ATSLA_ADX_TENANT_ID,
+    tenantId: process.env.ATLAS_ADX_TENANT_ID ?? process.env.ATSLA_ADX_TENANT_ID,
   });
   try {
     const accessible = new Set(await repository.listDatabases());

@@ -1,4 +1,4 @@
-# Global ATSLA Guardrails
+# Global ATLAS Guardrails
 
 ## Always Protect
 

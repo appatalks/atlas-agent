@@ -14,7 +14,11 @@ describe("HTTP control plane", () => {
     process.env.VOICE_BRIDGE_SESSIONS_PATH = join(testRoot, "sessions");
     process.env.VOICE_BRIDGE_CLIENTS_ROOT = join(testRoot, "clients");
     process.env.VOICE_BRIDGE_GLOBAL_KNOWLEDGE_PATH = join(testRoot, "global");
-    process.env.ATSLA_KNOWLEDGE_BACKEND = "sqlite";
+    process.env.ATLAS_KNOWLEDGE_BACKEND = "sqlite";
+    delete process.env.ATLAS_ADX_CLUSTER_URL;
+    delete process.env.ATLAS_ADX_DEFAULT_DATABASE;
+    delete process.env.ATLAS_ADX_PUBLIC_DATABASE;
+    delete process.env.ATSLA_KNOWLEDGE_BACKEND;
     delete process.env.ATSLA_ADX_CLUSTER_URL;
     delete process.env.ATSLA_ADX_DEFAULT_DATABASE;
     delete process.env.ATSLA_ADX_PUBLIC_DATABASE;
@@ -28,7 +32,7 @@ describe("HTTP control plane", () => {
     delete process.env.VOICE_BRIDGE_GLOBAL_KNOWLEDGE_PATH;
     delete process.env.VOICE_BRIDGE_PROVIDER;
     delete process.env.LOCAL_VOICE_BRIDGE_URL;
-    delete process.env.ATSLA_KNOWLEDGE_BACKEND;
+    delete process.env.ATLAS_KNOWLEDGE_BACKEND;
     rmSync(testRoot, { recursive: true, force: true });
   });
 
@@ -62,7 +66,7 @@ describe("HTTP control plane", () => {
 
     const dashboard = await server.inject({ method: "GET", url: "/" });
     expect(dashboard.headers["content-type"]).toContain("text/html");
-    expect(dashboard.body).toContain("ATSLA | Support Live Agent");
+    expect(dashboard.body).toContain("ATLAS | Live Agentic Support");
     expect(dashboard.body).toContain("AppaTalks");
     expect(dashboard.body).toContain("Open folder");
     expect(dashboard.body).toContain("Public knowledge only");
@@ -76,8 +80,8 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain("Higher levels can increase latency and premium usage");
     expect(dashboard.body).toContain("data-settings-tab=\"appearance\"");
     expect(dashboard.body).toContain("appearanceTheme");
-    expect(dashboard.body).toContain("ATSLA signal");
-    expect(dashboard.body).toContain("theme-atsla");
+    expect(dashboard.body).toContain("ATLAS signal");
+    expect(dashboard.body).toContain("theme-atlas");
     expect(dashboard.body).toContain("glassTransparency");
     expect(dashboard.body).toContain("theme-lcars");
     expect(dashboard.body).toContain("theme-terminal");
@@ -275,7 +279,7 @@ describe("HTTP control plane", () => {
 
     const exported = await server.inject({ method: "GET", url: "/v1/knowledge/client/export" });
     expect(exported.statusCode).toBe(200);
-    expect(exported.json().snapshot).toMatchObject({ format: "atsla-knowledge-snapshot", scope: "client", scopeId: routeA.clientId });
+    expect(exported.json().snapshot).toMatchObject({ format: "atlas-knowledge-snapshot", scope: "client", scopeId: routeA.clientId });
     const sameClientImport = await server.inject({ method: "POST", url: "/v1/knowledge/client/import", payload: { snapshot: exported.json().snapshot } });
     expect(sameClientImport.statusCode).toBe(200);
 

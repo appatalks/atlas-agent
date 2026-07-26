@@ -41,7 +41,7 @@ check_node_runtime() {
   local node_major
   node_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
   if [[ ! "$node_major" =~ ^[0-9]+$ ]] || (( node_major < 24 )); then
-    echo "ATSLA requires Node.js 24 or newer for its built-in SQLite knowledge store. Found: $(node --version)" >&2
+    echo "ATLAS requires Node.js 24 or newer for its built-in SQLite knowledge store. Found: $(node --version)" >&2
     exit 1
   fi
   node -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(":memory:"); const enabled = db.prepare("SELECT sqlite_compileoption_used(?) AS enabled").get("ENABLE_FTS5").enabled; db.close(); if (!enabled) process.exit(1)' || {
@@ -79,7 +79,8 @@ install_launcher() {
   [[ "$INSTALL_LAUNCHER" == "true" ]] || return
   local bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
   local app_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-  local launcher="$bin_dir/atsla"
+  local launcher="$bin_dir/atlas"
+  local legacy_launcher="$bin_dir/atsla"
   local quoted_root
   quoted_root="$(printf '%q' "$ROOT_DIR")"
   mkdir -p "$bin_dir"
@@ -94,33 +95,41 @@ case "\${1:-start}" in
   update)
     git -C "\$ROOT_DIR" pull --ff-only
     npm --prefix "\$ROOT_DIR" install
-    echo "ATSLA updated. Run: atsla start"
+    echo "ATLAS updated. Run: atlas start"
     ;;
   path) printf '%s\\n' "\$ROOT_DIR" ;;
   help|--help|-h)
     cat <<'USAGE'
-Usage: atsla [start|stop|status|update|path]
+Usage: atlas [start|stop|status|update|path]
 USAGE
     ;;
-  *) echo "Unknown ATSLA command: \$1" >&2; exit 2 ;;
+  *) echo "Unknown ATLAS command: \$1" >&2; exit 2 ;;
 esac
 EOF
   chmod +x "$launcher"
+  cat > "$legacy_launcher" <<EOF
+#!/usr/bin/env bash
+echo "atsla has been renamed to atlas; forwarding this command." >&2
+exec "$launcher" "\$@"
+EOF
+  chmod +x "$legacy_launcher"
   if [[ "$OS" == "Linux" ]]; then
     mkdir -p "$app_dir"
-    cat > "$app_dir/atsla-support-live-agent.desktop" <<EOF
+    cat > "$app_dir/atlas-live-agentic-support.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=ATSLA | Support Live Agent
+Name=ATLAS | Live Agentic Support
 Comment=Local operator-controlled AI support agent
 Exec=$launcher start
 Terminal=false
 Categories=Utility;Network;
 StartupNotify=true
 EOF
+    rm -f "$app_dir/atsla-support-live-agent.desktop" "$app_dir/atlas-live-agent-support.desktop"
   fi
   echo "Installed launcher: $launcher"
-  [[ "$OS" == "Linux" ]] && echo "Installed desktop entry: $app_dir/atsla-support-live-agent.desktop"
+  echo "Installed compatibility alias: $legacy_launcher"
+  [[ "$OS" == "Linux" ]] && echo "Installed desktop entry: $app_dir/atlas-live-agentic-support.desktop"
 }
 
 main() {
@@ -145,11 +154,11 @@ main() {
   cat <<'EOF'
 Installation complete.
 
-Start: atsla
-Status: atsla status
-Stop: atsla stop
+Start: atlas
+Status: atlas status
+Stop: atlas stop
 
-If atsla is not found, add ~/.local/bin to your PATH or run npm run app:start from this checkout.
+If atlas is not found, add ~/.local/bin to your PATH or run npm run app:start from this checkout.
 EOF
 }
 
@@ -161,7 +170,7 @@ Environment options:
   VOICE_CLONE_MODULE_PATH     Alternate voice_clone_module source directory.
   VOICE_BRIDGE_INSTALL_VOICE  Set false to skip voice module setup.
   VOICE_BRIDGE_INSTALL_WHISPER Set false to skip local Whisper bootstrap.
-  VOICE_BRIDGE_INSTALL_LAUNCHER Set false to skip atsla launcher and desktop entry.
+  VOICE_BRIDGE_INSTALL_LAUNCHER Set false to skip atlas launcher and desktop entry (the atsla compatibility alias is installed with it).
 EOF
   exit 0
 fi

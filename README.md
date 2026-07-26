@@ -1,34 +1,34 @@
-# ATSLA | Support Live Agent
+# ATLAS | Live Agentic Support
 
-![ATSLA Support Live Agent](docs/atsla-agent.png)
+![ATLAS Live Agentic Support](docs/atlas-agent-splash.png)
 
-[Technical guide](README-2.md) | [Database seed](template-database-seed) | [Client template](template-client-folder) | [Public knowledge template](template-public-knowledgebase) | [Issues](https://github.com/appatalks/atsla-support-live-agent/issues)
+[Technical guide](README-2.md) | [Database seed](template-database-seed) | [Client template](template-client-folder) | [Public knowledge template](template-public-knowledgebase) | [Issues](https://github.com/appatalks/atlas-live-agentic-support/issues)
 
-ATSLA is a local, operator-controlled AI support agent for live customer conversations. It listens to call audio, starts with shared public knowledge, adds private knowledge only for the client selected by the operator, applies explicit global and client guardrails, and speaks through voice profiles when the operator authorizes or enables autonomous participation.
+ATLAS is a local, operator-controlled AI support agent for live customer conversations. It listens to call audio, starts with shared public knowledge, adds private knowledge only for the client selected by the operator, applies explicit global and client guardrails, and speaks through voice profiles when the operator authorizes or enables autonomous participation.
 
 ## Public Quick Install
 
-Install ATSLA with one command:
+Install ATLAS with one command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/appatalks/atsla-support-live-agent/main/get-atsla.sh | bash
+curl -fsSL https://raw.githubusercontent.com/appatalks/atlas-live-agentic-support/main/get-atlas.sh | bash
 ```
 
-Then launch ATSLA:
+Then launch ATLAS:
 
 ```bash
-atsla
+atlas
 ```
 
-The installer creates an `atsla` command and, on Linux, a desktop application entry. Use `atsla status`, `atsla stop`, and `atsla update` for everyday operation. The first installation checks required local audio, transcription, voice, and model dependencies; it reports any missing system prerequisite before changing the audio graph.
+The installer creates an `atlas` command and, on Linux, a desktop application entry. Use `atlas status`, `atlas stop`, and `atlas update` for everyday operation. The first installation checks required local audio, transcription, voice, and model dependencies; it reports any missing system prerequisite before changing the audio graph.
 
 Or clone manually:
 
 ```bash
-git clone https://github.com/appatalks/atsla-support-live-agent.git
-cd atsla-support-live-agent
+git clone https://github.com/appatalks/atlas-live-agentic-support.git
+cd atlas-live-agentic-support
 bash tools/install.sh
-atsla
+atlas
 ```
 
 ## What You Get
@@ -47,26 +47,26 @@ atsla
 
 ## Get Started
 
-1. Launch `atsla` and join the call.
+1. Launch `atlas` and join the call.
 2. Choose Local SQLite or Azure Data Explorer in **Settings > Workspace**, then configure a durable shared public knowledge folder from [template-public-knowledgebase](template-public-knowledgebase). Leave the optional public database blank to keep that scope local.
 3. Use the main **Client** window to stay in **Public knowledge only**, select an automatically discovered ADX database, or select/create a local SQLite client.
 4. In SQLite mode, optionally add a folder based on [template-client-folder](template-client-folder) for additive session context and meeting artifacts, then select **Load context**.
-5. Start a session. ATSLA sends the Standard Greeting once. A clear resolution phrase can trigger customer feedback and autonomous learning evaluation, or the operator can choose **Ask feedback & finish**.
+5. Start a session. ATLAS sends the Standard Greeting once. A clear resolution phrase can trigger customer feedback and autonomous learning evaluation, or the operator can choose **Ask feedback & finish**.
 6. Choose Monitor, Approve, or Autonomous mode. Use takeover whenever a person should resume the conversation. Autonomous learning and customer feedback can be disabled independently under **Settings > Agent**.
 
-The committed templates are fictional examples. Real client data, supplementary context folders, and generated `.atsla/` databases belong outside this repository.
+The committed templates are fictional examples. Real client data, supplementary context folders, and generated `.atlas/` databases belong outside this repository.
 
 ## Privacy
 
-ATSLA is an operator tool, not an unattended participant. Inform participants that an AI agent is present and obtain the required consent before capturing or retaining meeting material. Client context is opt-in; public and client guardrails are loaded before scoped database recall.
+ATLAS is an operator tool, not an unattended participant. Inform participants that an AI agent is present and obtain the required consent before capturing or retaining meeting material. Client context is opt-in; public and client guardrails are loaded before scoped database recall.
 
 ## Supervision And Responsibility
 
-ATSLA can generate inaccurate, incomplete, or inappropriate responses. A qualified human operator must actively supervise every live use, review or override agent output when needed, and take over the conversation for sensitive, high-impact, legal, financial, medical, security, or account-authority decisions. The project is provided as a tool; operators are responsible for validating outputs, protecting client data, meeting all applicable laws and policies, and obtaining any required participant consent.
+ATLAS can generate inaccurate, incomplete, or inappropriate responses. A qualified human operator must actively supervise every live use, review or override agent output when needed, and take over the conversation for sensitive, high-impact, legal, financial, medical, security, or account-authority decisions. The project is provided as a tool; operators are responsible for validating outputs, protecting client data, meeting all applicable laws and policies, and obtaining any required participant consent.
 
 ## Independent Project
 
-ATSLA is an independent, maintainer-led fun project. It is not an official product, service, or support channel of any company, platform, or model provider, and it comes without enterprise support or service-level commitments.
+ATLAS is an independent, maintainer-led fun project. It is not an official product, service, or support channel of any company, platform, or model provider, and it comes without enterprise support or service-level commitments.
 
 For manual installation, architecture, audio routing, client context, themes, troubleshooting, APIs, and validation, see [README-2.md](README-2.md).
 
@@ -74,6 +74,6 @@ For manual installation, architecture, audio routing, client context, themes, tr
 
 ## Built With Eva-Agent
 
-ATSLA's database memory, backend portability, scoped recall, and reviewed knowledge-update patterns build on technology developed in [Eva-Agent](https://github.com/appatalks/eva-agent/).
+ATLAS's database memory, backend portability, scoped recall, and reviewed knowledge-update patterns build on technology developed in [Eva-Agent](https://github.com/appatalks/eva-agent/).
 
 <a href="https://github.com/appatalks/eva-agent/"><img src="docs/Built_with_Eva-Agent.png" alt="Built with Eva-Agent" width="420"></a>

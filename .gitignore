@@ -2,12 +2,14 @@ node_modules/
 .env
 coverage/
 dist/
+.atlas/
 .atsla/
 vendor/*
 !vendor/voice_clone_module/
 !vendor/voice_clone_module/**
 vendor/voice_clone_module/.git/
 vendor/voice_clone_module/.venv/
+vendor/voice_clone_module/voices/
 vendor/voice_clone_module/**/__pycache__/
 vendor/voice_clone_module/**/*.egg-info/
 __pycache__/

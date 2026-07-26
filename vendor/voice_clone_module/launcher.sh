@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ATSLA_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
+ATLAS_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
 VENV_DIR="${ROOT_DIR}/.venv"
 REFERENCE_AUDIO="${1:-${VOICE_CLONE_REFERENCE:-}}"
-REFERENCE_AUDIO="${REFERENCE_AUDIO:-${ATSLA_ROOT}/assets/voices/appatalks-voice.wav}"
+REFERENCE_AUDIO="${REFERENCE_AUDIO:-${ATLAS_ROOT}/assets/voices/appatalks-voice.wav}"
 HOST="${VOICE_DEMO_HOST:-127.0.0.1}"
 PORT="${VOICE_DEMO_PORT:-8000}"
 URL="http://${HOST}:${PORT}"
@@ -16,7 +16,7 @@ if [[ ! -x "${VENV_DIR}/bin/voice-demo" ]]; then
 fi
 
 if [[ -z "${REFERENCE_AUDIO}" || ! -f "${REFERENCE_AUDIO}" ]]; then
-  echo "Default voice not found at ${ATSLA_ROOT}/assets/voices/appatalks-voice.wav." >&2
+  echo "Default voice not found at ${ATLAS_ROOT}/assets/voices/appatalks-voice.wav." >&2
   echo "Usage: ./launcher.sh /absolute/path/to/reference.wav" >&2
   echo "Or set VOICE_CLONE_REFERENCE to an existing audio file." >&2
   exit 1

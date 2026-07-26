@@ -1,6 +1,6 @@
 # Voice Clone Module
 
-Reusable Chatterbox voice cloning for local Python applications and interactive AI agents. This module is vendored by ATSLA and is not published as `voice-clone-module` on PyPI.
+Reusable Chatterbox voice cloning for local Python applications and interactive AI agents. This module is vendored by ATLAS and is not published as `voice-clone-module` on PyPI.
 
 ## What is included
 
@@ -12,7 +12,7 @@ Reusable Chatterbox voice cloning for local Python applications and interactive 
 
 The demo keeps both models on the local machine. Chat text is sent to the local FastAPI process, and each response is generated as a watermarked WAV file using the configured reference voice.
 
-## Install From ATSLA
+## Install From ATLAS
 
 ```bash
 cd vendor/voice_clone_module
@@ -34,7 +34,7 @@ export VOICE_CLONE_REFERENCE=/absolute/path/to/appatalks.wav
 ./launcher.sh
 ```
 
-ATSLA stores its default AppaTalks reference at `assets/voices/appatalks-voice.wav`. With that bundled voice, the shortest startup is:
+ATLAS stores its default AppaTalks reference at `assets/voices/appatalks-voice.wav`. With that bundled voice, the shortest startup is:
 
 ```bash
 ./launcher.sh

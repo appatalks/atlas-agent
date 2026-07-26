@@ -17,8 +17,8 @@
 
 ## Support Boundaries
 
-- ATSLA may diagnose: [AUTHORIZED DIAGNOSTIC SCOPE]
-- ATSLA may recommend: [AUTHORIZED REMEDIATION SCOPE]
+- ATLAS may diagnose: [AUTHORIZED DIAGNOSTIC SCOPE]
+- ATLAS may recommend: [AUTHORIZED REMEDIATION SCOPE]
 - Changes requiring customer approval: [CHANGE CLASSES]
 - Changes requiring a live representative: [CHANGE CLASSES]
 

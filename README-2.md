@@ -1,12 +1,12 @@
-# ATSLA Technical Reference
+# ATLAS Technical Reference
 
-This guide covers the local development and operations details for ATSLA | Support Live Agent. Start with `README.md` for the product overview and operator workflow.
+This guide covers the local development and operations details for ATLAS | Live Agentic Support. Start with `README.md` for the product overview and operator workflow.
 
 ## Architecture
 
-![ATSLA live support flow](docs/atsla-flow.png)
+![ATLAS live support flow](docs/atlas-flow.png)
 
-ATSLA coordinates the following local and optional remote services:
+ATLAS coordinates the following local and optional remote services:
 
 | Service | Responsibility |
 | --- | --- |
@@ -30,27 +30,33 @@ Logs default to `~/.local/state/voice-bridge/`. The supervisor owns its children
 
 ## Installation
 
-For a public release, use the bootstrap shown in [README.md](README.md). It clones ATSLA to `~/.local/share/atsla-support-live-agent`, runs the versioned installer, creates the `atsla` launcher, and creates a Linux desktop entry.
+For a public release, use the bootstrap shown in [README.md](README.md). It clones ATLAS to `~/.local/share/atlas-live-agentic-support`, runs the versioned installer, creates the `atlas` launcher, and creates a Linux desktop entry.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/appatalks/atsla-support-live-agent/main/get-atsla.sh | bash
-atsla
+curl -fsSL https://raw.githubusercontent.com/appatalks/atlas-live-agentic-support/main/get-atlas.sh | bash
+atlas
 ```
 
 For a checked-out repository, use the same installer directly:
 
 ```bash
 bash tools/install.sh
-atsla
+atlas
 ```
 
-For live Linux operation, provide Node.js 24 or newer, PipeWire/PulseAudio compatibility tools (`pactl`, `pw-cat`, and FFmpeg), a local `whisper.cpp` checkout and model, the authorized AppaTalks reference WAV, and either a local Qwen model service or an authenticated `copilot` CLI. ATSLA uses Node's built-in SQLite and FTS5 support for knowledge retrieval. Use `.env.example` as the configuration reference. Do not commit a populated `.env` file.
+For live Linux operation, provide Node.js 24 or newer, PipeWire/PulseAudio compatibility tools (`pactl`, `pw-cat`, and FFmpeg), a local `whisper.cpp` checkout and model, the authorized AppaTalks reference WAV, and either a local Qwen model service or an authenticated `copilot` CLI. ATLAS uses Node's built-in SQLite and FTS5 support for knowledge retrieval. Use `.env.example` as the configuration reference. Do not commit a populated `.env` file.
 
-The installer supports `--skip-voice`, `--skip-whisper`, and `--no-launcher` for development or staged setup. `atsla status`, `atsla stop`, and `atsla update` manage an installed checkout.
+The installer supports `--skip-voice`, `--skip-whisper`, and `--no-launcher` for development or staged setup. `atlas status`, `atlas stop`, and `atlas update` manage an installed checkout.
+
+### ATSLA To ATLAS Migration
+
+ATLAS means **AppaTalks Live Agentic Support**. The installer migrates the former `atsla-support-live-agent` checkout to `atlas-live-agentic-support`, installs `atlas` as the primary command, and retains `atsla` as a forwarding compatibility alias. Existing `ATSLA_*` environment variables, `.atsla` knowledge folders, `.atsla-cache` client caches, ATSLA theme/profile settings, `atsla-knowledge-snapshot` payloads, and `AtslaKnowledgeSnapshots` ADX tables remain readable. New writes use `ATLAS_*`, `.atlas`, `.atlas-cache`, `atlas-knowledge-snapshot`, and `AtlasKnowledgeSnapshots`.
+
+Loading an existing ADX-backed client reads the canonical table first, falls back to the legacy table when needed, and writes the next snapshot to `AtlasKnowledgeSnapshots`. The legacy table is left intact for rollback safety.
 
 ## Audio Routing
 
-On Linux, ATSLA creates two dedicated sinks:
+On Linux, ATLAS creates two dedicated sinks:
 
 | Name | Role |
 | --- | --- |
@@ -98,7 +104,7 @@ meetings/
 
 `client-profile.json`, `context-drop/`, `knowledge/`, `skills/`, and `learnings/` are optional additive import sources. Selecting **Load context** first pulls the database client, then merges reviewed supplementary files into the client-ID-keyed local cache. The `meetings/` directory is never imported. Files or folders named `restricted`, and filenames containing `.restricted.`, are retained in the index but excluded from recall.
 
-Each client has a physically separate SQLite cache keyed by stable client ID. In ADX mode that cache materializes only the client database selected in the main **Client** window, preserving identical FTS retrieval and low live-call latency. The shared public knowledge base remains a durable operator folder with its own local cache and synchronizes to ADX only when an operator selects a public database. ATSLA chooses database routes from operator state and stable client identity, not caller text, and sends the reasoning model only bounded retrieved excerpts. The model receives no SQL, KQL, database selector, client registry, or database tool.
+Each client has a physically separate SQLite cache keyed by stable client ID. In ADX mode that cache materializes only the client database selected in the main **Client** window, preserving identical FTS retrieval and low live-call latency. The shared public knowledge base remains a durable operator folder with its own local cache and synchronizes to ADX only when an operator selects a public database. ATLAS chooses database routes from operator state and stable client identity, not caller text, and sends the reasoning model only bounded retrieved excerpts. The model receives no SQL, KQL, database selector, client registry, or database tool.
 
 Sessions are persisted under `~/.local/share/voice-bridge/sessions/` and include their stable client scope plus an `active`, `awaiting-feedback`, or `completed` lifecycle. The application lists, opens, and renames only sessions belonging to the selected client or the dedicated public-only scope. Starting a session always sends the Standard Greeting once. A clear customer resolution phrase such as "that fixed it" requests outcome feedback automatically. The next customer turn completes the session, or the operator can use **Ask feedback & finish** and **Finish without feedback**. Switching clients persists the prior session, clears live transcript/drafts/escalations, unloads client context, and starts with an empty session list when that scope has no prior sessions.
 
@@ -108,7 +114,7 @@ Global documentation is separate from client data. Configure one durable shared 
 
 ### Supplementary Context And Guardrails
 
-Supplementary client folders include `context-drop/`, an operator-friendly additive import area. ATSLA accepts reviewed `.md`, `.txt`, `.json`, `.csv`, `.yaml`, and `.yml` files, chunks them, indexes them with FTS5, and records stable source paths and content hashes. Unchanged files are not reindexed; removed imports are pruned without affecting future AI-approved database records.
+Supplementary client folders include `context-drop/`, an operator-friendly additive import area. ATLAS accepts reviewed `.md`, `.txt`, `.json`, `.csv`, `.yaml`, and `.yml` files, chunks them, indexes them with FTS5, and records stable source paths and content hashes. Unchanged files are not reindexed; removed imports are pruned without affecting future AI-approved database records.
 
 Use `context-drop/CONTEXT-GUARDRAILS.md` for client-specific policy. Write clear sections for **May Discuss**, **Sensitive Or Restricted**, and **Required Behavior**. Describe what to decline, what to escalate, and the safe alternative to provide. This file is loaded before the client reference material.
 
@@ -122,7 +128,7 @@ Best practices:
 - State an escalation path for authorization, pricing, legal, security, and account-specific requests.
 - Review `learnings/` before promoting observations into durable client reference material.
 - Start optional supplementary folders from [template-client-folder](template-client-folder) and public documentation from [template-public-knowledgebase](template-public-knowledgebase).
-- Keep real client folders, local caches, and generated `.atsla/` databases outside the git repository.
+- Keep real client folders, local caches, and generated `.atlas/` databases outside the git repository.
 
 ### Reviewed Knowledge Updates
 
@@ -138,15 +144,15 @@ Proposal scope is resolved from operator state. Client proposal operations requi
 
 Choose **Local SQLite** or **Azure Data Explorer** under **Settings > Workspace**. SQLite is the default and requires no cloud service. ADX mode uses the official `azure-kusto-data` SDK and keeps a local materialized SQLite cache for live recall.
 
-ADX accepts a direct cluster endpoint or an Azure Data Explorer portal link. Authentication options are cached device code, interactive browser, Azure CLI, managed identity, or application credentials. **Device code** is recommended for personal Microsoft accounts without subscriptions and matches EVA's Kusto authentication path. ATSLA first performs a direct MSAL silent refresh from the secure OS cache and prompts only when no reusable Kusto session exists. Azure CLI remains useful for work accounts with an active CLI account profile. Managed-identity and application IDs/secrets are environment-only; ATSLA never persists them in settings or exposes them to the model.
+ADX accepts a direct cluster endpoint or an Azure Data Explorer portal link. Authentication options are cached device code, interactive browser, Azure CLI, managed identity, or application credentials. **Device code** is recommended for personal Microsoft accounts without subscriptions and matches EVA's Kusto authentication path. ATLAS first performs a direct MSAL silent refresh from the secure OS cache and prompts only when no reusable Kusto session exists. Azure CLI remains useful for work accounts with an active CLI account profile. Managed-identity and application IDs/secrets are environment-only; ATLAS never persists them in settings or exposes them to the model.
 
 ```bash
-ATSLA_KNOWLEDGE_BACKEND=adx
-ATSLA_ADX_CLUSTER_URL=https://cluster.region.kusto.windows.net
-ATSLA_ADX_AUTH_MODE=device-code
+ATLAS_KNOWLEDGE_BACKEND=adx
+ATLAS_ADX_CLUSTER_URL=https://cluster.region.kusto.windows.net
+ATLAS_ADX_AUTH_MODE=device-code
 ```
 
-`ATSLA_ADX_DEFAULT_DATABASE` is an optional shared-public route and is never used as a private-client fallback. Leave it blank to keep public knowledge local, or select an accessible database in Settings to synchronize the durable public folder's cache and snapshots. Every private client must resolve to its own explicitly selected or uniquely matched ADX database.
+`ATLAS_ADX_DEFAULT_DATABASE` is an optional shared-public route and is never used as a private-client fallback. Leave it blank to keep public knowledge local, or select an accessible database in Settings to synchronize the durable public folder's cache and snapshots. Every private client must resolve to its own explicitly selected or uniquely matched ADX database.
 
 Database clients are stored in the administrator client catalog with a stable `id`. A supplementary `client-profile.json` mirrors that identity when a folder is attached. An optional `knowledgeDatabase` provides an explicit route. Resolution fails closed and uses this order:
 
@@ -156,35 +162,35 @@ Database clients are stored in the administrator client catalog with a stable `i
 
 Missing and ambiguous routes are errors. Caller text and model output never participate in routing. The main **Client** selector automatically lists databases available to the authenticated admin and offers a manual refresh. Workspace settings contain backend, authentication, cluster, and default public-database configuration, but no private-client selector.
 
-On first device-code use, open the displayed Microsoft device-login page and enter the code. The Kusto session is then stored under the dedicated `atsla-adx` identity cache. Set `ATSLA_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE=true` only on a trusted single-user machine when no OS credential store is available.
+On first device-code use, open the displayed Microsoft device-login page and enter the code. The Kusto session is then stored under the dedicated `atlas-adx` identity cache. Set `ATLAS_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE=true` only on a trusted single-user machine when no OS credential store is available.
 
 Use a separate ADX database and scoped RBAC identity per private client. When configured, the optional default database carries only shared public knowledge. Do not use one unrestricted identity across unrelated customer databases.
 
-On **Load context**, ATSLA pulls the latest matching ADX snapshot when present, refreshes reviewed file imports locally, and appends the merged versioned snapshot back to the same resolved database. Approved and autonomously promoted proposals also synchronize after mutation. Explicit **Pull** and **Push** controls are available for recovery and administration.
+On **Load context**, ATLAS pulls the latest matching ADX snapshot when present, refreshes reviewed file imports locally, and appends the merged versioned snapshot back to the same resolved database. Approved and autonomously promoted proposals also synchronize after mutation. Explicit **Pull** and **Push** controls are available for recovery and administration.
 
 Portable JSON snapshots include documents, quality metadata, immutable versions, policies, proposal state, and compaction metadata. Client snapshots move between SQLite and ADX; public snapshots back up or restore the local shared store. To bound long-running ADX transfers, each snapshot carries the latest 20 versions per document and latest 1,000 proposals while the local SQLite audit database keeps full history. The snapshot scope ID must match the selected client or public scope, so cross-client imports are rejected.
 
 ### Azure Data Explorer Authentication
 
-For a personal Microsoft account without an Azure subscription, select **Device code (personal account)**. ATSLA uses the Kusto scope directly, matching Eva-Agent's approach and avoiding Azure Resource Manager subscription requirements.
+For a personal Microsoft account without an Azure subscription, select **Device code (personal account)**. ATLAS uses the Kusto scope directly, matching Eva-Agent's approach and avoiding Azure Resource Manager subscription requirements.
 
 1. Configure the ADX cluster endpoint or paste its Data Explorer portal URL.
 2. Select `device-code` authentication and choose **Discover** or **Load context**.
 3. On the first use, open `https://login.microsoft.com/device` and enter the displayed code.
 4. Complete sign-in with an account authorized on the ADX databases.
-5. ATSLA stores the MSAL session in the OS credential store and uses silent refresh for later commands and restarts.
+5. ATLAS stores the MSAL session in the OS credential store and uses silent refresh for later commands and restarts.
 
 ```bash
-ATSLA_KNOWLEDGE_BACKEND=adx
-ATSLA_ADX_CLUSTER_URL=https://cluster.region.kusto.windows.net
-ATSLA_ADX_AUTH_MODE=device-code
+ATLAS_KNOWLEDGE_BACKEND=adx
+ATLAS_ADX_CLUSTER_URL=https://cluster.region.kusto.windows.net
+ATLAS_ADX_AUTH_MODE=device-code
 ```
 
-`ATSLA_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE` defaults to false. Set it to true only on a trusted single-user machine when no OS credential store is available. Azure CLI authentication is also supported for work accounts with an active CLI account profile. Managed identity is recommended for unattended production deployments; application credentials must be supplied through environment variables or a secret manager and are never persisted in ATSLA settings.
+`ATLAS_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE` defaults to false. Set it to true only on a trusted single-user machine when no OS credential store is available. Azure CLI authentication is also supported for work accounts with an active CLI account profile. Managed identity is recommended for unattended production deployments; application credentials must be supplied through environment variables or a secret manager and are never persisted in ATLAS settings.
 
 ## Provider Isolation
 
-Local Qwen receives only the current request transcript and application-retrieved public plus active-client context. GitHub Copilot CLI is launched through ATSLA's own `tools/copilot-no-memory.sh` and `tools/stateless_acp_bridge.py` adapter:
+Local Qwen receives only the current request transcript and application-retrieved public plus active-client context. GitHub Copilot CLI is launched through ATLAS's own `tools/copilot-no-memory.sh` and `tools/stateless_acp_bridge.py` adapter:
 
 - Copilot resume, continuation, session-ID, and memory options are rejected.
 - Custom instructions, built-in MCPs, remote control, and durable request logs are disabled.
@@ -193,13 +199,13 @@ Local Qwen receives only the current request transcript and application-retrieve
 - No EVA checkout or shared ACP bridge is required.
 - Neither provider can issue database queries or select another client's store.
 
-This keeps ATSLA as the authority for client context and prevents Copilot conversation history from crossing clients.
+This keeps ATLAS as the authority for client context and prevents Copilot conversation history from crossing clients.
 
 Under **Settings > Agent**, Copilot models expose the CLI's reasoning levels: model default, none, minimal, low, medium, high, xhigh, and max. The selected level is persisted and passed to each isolated Copilot process with `--reasoning-effort`. Local Qwen does not use this control. Higher levels can increase response latency and premium-request usage.
 
 ## Eva-Agent Technology
 
-ATSLA's database memory, SQLite/ADX portability, scoped recall, secure Kusto authentication, and reviewed knowledge-update workflow build on technology and implementation patterns developed in [Eva-Agent](https://github.com/appatalks/eva-agent/). ATSLA remains independently deployable: no Eva-Agent checkout, process, or shared bridge is required at runtime.
+ATLAS's database memory, SQLite/ADX portability, scoped recall, secure Kusto authentication, and reviewed knowledge-update workflow build on technology and implementation patterns developed in [Eva-Agent](https://github.com/appatalks/eva-agent/). ATLAS remains independently deployable: no Eva-Agent checkout, process, or shared bridge is required at runtime.
 
 The linked attribution badge in [README.md](README.md) is stored locally at `docs/Built_with_Eva-Agent.png` and links back to the Eva-Agent repository.
 
@@ -215,13 +221,13 @@ Live-representative requests cancel pending autonomous work and retain an operat
 
 ## Voice Output
 
-The vendored `voice_clone_module` provides local Chatterbox speech synthesis. Voice reference files live in `assets/voices/`: `appatalks-voice.wav` is the default AppaTalks reference and `eva-voice.wav` is the bundled Eva reference. Add authorized local references to that folder, then use `VOICE_CLONE_REFERENCE` or `EVA_VOICE_REFERENCE` to select a replacement. The AppaTalks Standard Greeting is packaged as a fingerprint-validated seed cache, so a matching authorized reference can start without regenerating it; replacing the reference safely triggers a fresh synthesis. Settings expose per-profile expression (`exaggeration`) and pacing (`cfg_weight`) controls. The original Chatterbox model does not support Turbo paralinguistic tags, so ATSLA uses natural punctuation and wording instead.
+The vendored `voice_clone_module` provides local Chatterbox speech synthesis. Voice reference files live in `assets/voices/`: `appatalks-voice.wav` is the default AppaTalks reference and `eva-voice.wav` is the bundled Eva reference. Add authorized local references to that folder, then use `VOICE_CLONE_REFERENCE` or `EVA_VOICE_REFERENCE` to select a replacement. The AppaTalks Standard Greeting is packaged as a fingerprint-validated seed cache, so a matching authorized reference can start without regenerating it; replacing the reference safely triggers a fresh synthesis. Settings expose per-profile expression (`exaggeration`) and pacing (`cfg_weight`) controls. The original Chatterbox model does not support Turbo paralinguistic tags, so ATLAS uses natural punctuation and wording instead.
 
 Voice output is sent only to the `voice_bridge_agent` sink on Linux. The operator can monitor it through the physical-output loopback.
 
 ### Optional Remote TTS
 
-Local TTS remains the default. The GPU machine does not need the ATSLA desktop, API, Qwen bridge, Copilot bridge, or Whisper service. It only needs the ATSLA checkout's voice runtime and TTS service. Create a `.env` file in the ATSLA checkout on the GPU machine:
+Local TTS remains the default. The GPU machine does not need the ATLAS desktop, API, Qwen bridge, Copilot bridge, or Whisper service. It only needs the ATLAS checkout's voice runtime and TTS service. Create a `.env` file in the ATLAS checkout on the GPU machine:
 
 ```bash
 VOICE_BRIDGE_TTS_AUTH_TOKEN=use-a-long-shared-secret
@@ -234,7 +240,7 @@ Then start the service with `bash tools/tts-server.sh`. Keep that process runnin
 
 Restrict port `8090` to the client host or a private VPN in the GPU machine firewall. The server requires the bearer token and exposes only `/health` and `/v1/speech`.
 
-On the client machine, create a separate `.env` file in its ATSLA checkout. The mode is optional: a configured remote URL automatically selects remote mode. Setting `VOICE_BRIDGE_TTS_MODE=remote` makes the choice explicit.
+On the client machine, create a separate `.env` file in its ATLAS checkout. The mode is optional: a configured remote URL automatically selects remote mode. Setting `VOICE_BRIDGE_TTS_MODE=remote` makes the choice explicit.
 
 ```bash
 VOICE_BRIDGE_TTS_MODE=remote
@@ -242,10 +248,10 @@ VOICE_BRIDGE_REMOTE_TTS_URL=http://gpu-tts-host:8090/
 VOICE_BRIDGE_TTS_AUTH_TOKEN=use-a-long-shared-secret
 ```
 
-Start ATSLA normally; no exports are required:
+Start ATLAS normally; no exports are required:
 
 ```bash
-atsla
+atlas
 ```
 
 The Voice settings tab is populated with the resolved endpoint from this configuration. Changing **TTS engine location** and saving updates the active speech route immediately. The client still performs PipeWire or CoreAudio playback locally. Set `VOICE_BRIDGE_TTS_MODE=local` and remove the remote URL to return to local synthesis.
@@ -256,7 +262,7 @@ The **Appearance** settings tab provides four persistent console themes:
 
 | Theme | Intent |
 | --- | --- |
-| ATSLA signal | Default midnight-blue console with cyan, periwinkle, and rose accents drawn from the ATSLA visual identity. |
+| ATLAS signal | Default midnight-blue console with cyan, periwinkle, and rose accents drawn from the ATLAS visual identity. |
 | Atelier glass | Default light operational console with translucent panels. |
 | LCARS command | Star Trek-inspired command palette with high-contrast structural color. |
 | Terminal monochrome | Green phosphor terminal styling for dense operational work. |
@@ -317,7 +323,7 @@ The repository includes a repeatable fictional seed for `fintech-demo-1` and `he
 ```bash
 source tools/load-env.sh
 load_env_file "$PWD"
-ATSLA_ADX_AUTH_MODE=device-code npm run seed:demo-clients
+ATLAS_ADX_AUTH_MODE=device-code npm run seed:demo-clients
 ```
 
 Each database receives four versioned documents, one restricted canary, and client-specific guardrails. Optional supplementary folders may add current session context, while the durable shared public folder remains local and is injected for every client. Tests should confirm own runbook and supplementary canaries are present, shared triage is present, other-client canaries are absent, restricted canaries are absent, and session IDs cannot be opened across clients.

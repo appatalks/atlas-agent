@@ -1,4 +1,4 @@
-# Global ATSLA Guardrails
+# Global ATLAS Guardrails
 
 Copy this file to the root of the **Global shared knowledge folder** as `GLOBAL-GUARDRAILS.md`. These guardrails are loaded before every client workspace and take precedence over all reference material.
 

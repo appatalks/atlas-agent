@@ -9,7 +9,7 @@ describe("client database seed template", () => {
   it("builds a portable, seed-authority support knowledge snapshot", () => {
     const snapshot = buildTemplateSeed("template-client");
     expect(snapshot).toMatchObject({
-      format: "atsla-knowledge-snapshot",
+      format: "atlas-knowledge-snapshot",
       version: 1,
       scope: "client",
       scopeId: "template-client",
@@ -18,7 +18,7 @@ describe("client database seed template", () => {
     expect(snapshot.documents.every((document) => document.quality?.authority === "seed" && document.quality.confidence === 1)).toBe(true);
     expect(snapshot.policies).toMatchObject([{ sourcePath: "CLIENT-GUARDRAILS.md", status: "active" }]);
 
-    const root = mkdtempSync(join(tmpdir(), "atsla-seed-import-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-seed-import-"));
     const store = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
     try {
       store.importSnapshot(snapshot);

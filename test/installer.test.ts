@@ -5,18 +5,28 @@ import { describe, expect, it } from "vitest";
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 describe("installation entry points", () => {
-  it("provides a curl bootstrap and a durable atsla launcher", () => {
-    const bootstrap = readFileSync(`${root}/get-atsla.sh`, "utf8");
+  it("provides a curl bootstrap and a durable atlas launcher", () => {
+    const bootstrap = readFileSync(`${root}/get-atlas.sh`, "utf8");
     const installer = readFileSync(`${root}/tools/install.sh`, "utf8");
+    const readme = readFileSync(`${root}/README.md`, "utf8");
 
-    expect(bootstrap).toContain("https://github.com/appatalks/atsla-support-live-agent.git");
+    expect(bootstrap).toContain("https://github.com/appatalks/atlas-live-agentic-support.git");
     expect(bootstrap).toContain('exec bash "$INSTALL_DIR/tools/install.sh"');
-    expect(installer).toContain('local launcher="$bin_dir/atsla"');
-    expect(installer).toContain('Usage: atsla [start|stop|status|update|path]');
+    expect(installer).toContain('local launcher="$bin_dir/atlas"');
+    expect(installer).toContain('local legacy_launcher="$bin_dir/atsla"');
+    expect(installer).toContain('Usage: atlas [start|stop|status|update|path]');
     expect(installer).toContain('[[ "$INSTALL_VOICE" == "true" ]] || return 0');
     expect(installer).toContain('node "$electron_dir/install.js"');
     expect(installer).toContain('npm install --include=dev');
-    expect(installer).toContain("ATSLA requires Node.js 24 or newer");
+    expect(installer).toContain("ATLAS requires Node.js 24 or newer");
+    expect(bootstrap).toContain("Migrating ATSLA installation to ATLAS");
+    expect(readme).toContain("docs/atlas-agent-splash.png");
+    expect(readme).not.toContain("docs/atlas-agent.png");
+    expect(existsSync(`${root}/docs/atlas-agent-splash.png`)).toBe(true);
+    expect(existsSync(`${root}/docs/atlas-flow.dot`)).toBe(true);
+    expect(existsSync(`${root}/docs/atlas-flow.png`)).toBe(true);
+    expect(existsSync(`${root}/docs/atsla-agent.png`)).toBe(false);
+    expect(existsSync(`${root}/docs/atsla-flow.dot`)).toBe(false);
     expect(installer).toContain('require("node:sqlite")');
     expect(installer).toContain('sqlite_compileoption_used(?)');
     expect(installer).toContain('.get("ENABLE_FTS5")');
@@ -26,7 +36,7 @@ describe("installation entry points", () => {
     expect(existsSync(`${root}/assets/voices/appatalks-voice.wav`)).toBe(true);
   });
 
-  it("starts ATSLA's independent stateless Copilot ACP bridge", () => {
+  it("starts ATLAS's independent stateless Copilot ACP bridge", () => {
     const supervisor = readFileSync(`${root}/tools/voice-bridge.sh`, "utf8");
     const bridge = readFileSync(`${root}/tools/stateless_acp_bridge.py`, "utf8");
     expect(supervisor).toContain('python3 "$ROOT_DIR/tools/stateless_acp_bridge.py"');

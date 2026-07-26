@@ -1,6 +1,6 @@
-# ATSLA Client Database Seed
+# ATLAS Client Database Seed
 
-This template creates a portable, client-scoped knowledge snapshot for a new ATSLA support database. Replace all bracketed placeholders before production use.
+This template creates a portable, client-scoped knowledge snapshot for a new ATLAS support database. Replace all bracketed placeholders before production use.
 
 The structure separates authoritative seed knowledge from autonomously learned resolutions:
 

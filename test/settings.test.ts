@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { SqliteKnowledgeStore } from "../src/knowledge-store.js";
 import { ClientWorkspace, SettingsStore, defaultSettings, publicKnowledgeBackendConfig } from "../src/settings.js";
 
 describe("client workspace", () => {
@@ -84,12 +85,34 @@ describe("client workspace", () => {
     await workspace.loadGlobalKnowledge(publicKnowledge);
 
     expect(clientStats).toMatchObject({ documents: expect.any(Number), chunks: expect.any(Number) });
-    expect(existsSync(join(client, ".atsla", "client-knowledge.sqlite"))).toBe(true);
-    expect(existsSync(join(publicKnowledge, ".atsla", "public-knowledge.sqlite"))).toBe(true);
+    expect(existsSync(join(client, ".atlas", "client-knowledge.sqlite"))).toBe(true);
+    expect(existsSync(join(publicKnowledge, ".atlas", "public-knowledge.sqlite"))).toBe(true);
     expect(workspace.context(client, "Northwind support plan")).toContain("Enterprise Demo");
     expect(workspace.context(client, "public triage basics")).not.toContain("Public Triage Basics");
     expect(workspace.globalContext(publicKnowledge, "public triage basics")).toContain("Public Triage Basics");
     expect(workspace.globalContext(publicKnowledge, "Northwind support plan")).not.toContain("Enterprise Demo");
+  });
+
+  it("migrates legacy ATSLA knowledge folders and caches to ATLAS paths", () => {
+    const root = mkdtempSync(join(tmpdir(), "atlas-legacy-cache-"));
+    folders.push(root);
+    const clientFolder = join(root, "legacy-client");
+    mkdirSync(join(clientFolder, ".atsla"), { recursive: true });
+    const legacyClient = new SqliteKnowledgeStore("client", join(clientFolder, ".atsla", "client-knowledge.sqlite"));
+    legacyClient.sync([{ sourcePath: "knowledge/legacy.md", title: "Legacy", content: "LEGACY_FOLDER_CANARY" }], []);
+    legacyClient.close();
+    mkdirSync(join(root, ".atsla-cache"), { recursive: true });
+    const legacyCache = new SqliteKnowledgeStore("client", join(root, ".atsla-cache", "legacy-client.sqlite"));
+    legacyCache.sync([{ sourcePath: "learned/legacy.md", title: "Legacy cache", content: "LEGACY_CACHE_CANARY" }], []);
+    legacyCache.close();
+
+    const workspace = new ClientWorkspace(root);
+    expect(workspace.context(clientFolder, "legacy folder canary")).toContain("LEGACY_FOLDER_CANARY");
+    expect(workspace.contextForClient("legacy-client", "legacy cache canary")).toContain("LEGACY_CACHE_CANARY");
+    expect(existsSync(join(clientFolder, ".atlas", "client-knowledge.sqlite"))).toBe(true);
+    expect(existsSync(join(clientFolder, ".atsla"))).toBe(false);
+    expect(existsSync(join(root, ".atlas-cache", "legacy-client.sqlite"))).toBe(true);
+    expect(existsSync(join(root, ".atsla-cache"))).toBe(false);
   });
 });
 
@@ -98,7 +121,7 @@ describe("default voice profile", () => {
     const defaults = defaultSettings();
     const appaTalks = defaults.voiceProfiles.find((profile) => profile.name === "AppaTalks");
     expect(appaTalks?.instructions).toContain("AppaTalks, an expert GitHub Reliability Engineer");
-    expect(appaTalks?.instructions).toContain("ATSLA means AppaTalks Support Live Agent");
+    expect(appaTalks?.instructions).toContain("ATLAS means AppaTalks Live Agentic Support");
     expect(appaTalks).toMatchObject({ exaggeration: 0.65, cfgWeight: 0.35 });
     expect(defaults.voiceProfiles.find((profile) => profile.name === "Eva")).toMatchObject({
       id: "eva",
@@ -122,7 +145,7 @@ describe("default voice profile", () => {
       const store = new SettingsStore(path);
       store.update({ copilotReasoningEffort: "xhigh" });
 
-      expect(new SettingsStore(path).get()).toMatchObject({ settingsVersion: 13, copilotReasoningEffort: "xhigh" });
+      expect(new SettingsStore(path).get()).toMatchObject({ settingsVersion: 14, copilotReasoningEffort: "xhigh" });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -178,7 +201,7 @@ describe("default voice profile", () => {
       writeFileSync(path, JSON.stringify(legacy), "utf8");
       const migrated = new SettingsStore(path).get();
 
-      expect(migrated.settingsVersion).toBe(13);
+      expect(migrated.settingsVersion).toBe(14);
       expect(migrated.responseMode).toBe("autonomous");
       expect(migrated.defaultInputMode).toBe("agent");
     } finally {
@@ -186,22 +209,24 @@ describe("default voice profile", () => {
     }
   });
 
-  it("migrates existing Atsla and Appatalks settings to AppaTalks", () => {
+  it("migrates existing ATSLA and Appatalks settings to ATLAS and AppaTalks", () => {
     const root = mkdtempSync(join(tmpdir(), "voice-bridge-appatalks-migration-"));
     try {
       const path = join(root, "settings.json");
       const legacy = {
         ...defaultSettings(),
         settingsVersion: 6,
+        appearanceTheme: "atsla" as never,
         voiceProfile: "Atsla",
-        voiceProfiles: [{ id: "appatalks", name: "Appatalks", instructions: "Custom Appatalks instruction.", exaggeration: 0.65, cfgWeight: 0.35 }],
+        voiceProfiles: [{ id: "atsla", name: "Atsla", instructions: "You are ATSLA. ATSLA means AppaTalks Support Live Agent.", exaggeration: 0.65, cfgWeight: 0.35 }],
       };
       writeFileSync(path, JSON.stringify(legacy), "utf8");
       const migrated = new SettingsStore(path).get();
 
       expect(migrated.voiceProfile).toBe("AppaTalks");
       expect(migrated.voiceProfiles[0]).toMatchObject({ id: "appatalks", name: "AppaTalks" });
-      expect(migrated.voiceProfiles[0].instructions).toContain("AppaTalks");
+      expect(migrated.voiceProfiles[0].instructions).toContain("ATLAS means AppaTalks Live Agentic Support");
+      expect(migrated.appearanceTheme).toBe("atlas");
       const persisted = JSON.parse(readFileSync(path, "utf8"));
       expect(persisted.voiceProfile).toBe("AppaTalks");
       expect(persisted.voiceProfiles[0]).toMatchObject({ id: "appatalks", name: "AppaTalks" });
@@ -215,7 +240,7 @@ describe("default voice profile", () => {
     try {
       const path = join(root, "settings.json");
       const store = new SettingsStore(path);
-      expect(store.get()).toMatchObject({ appearanceTheme: "atsla", glassTransparency: 88 });
+      expect(store.get()).toMatchObject({ appearanceTheme: "atlas", glassTransparency: 88 });
 
       store.update({ appearanceTheme: "lcars", glassTransparency: 120 });
       expect(new SettingsStore(path).get()).toMatchObject({ appearanceTheme: "lcars", glassTransparency: 100 });
@@ -252,7 +277,7 @@ describe("default voice profile", () => {
         adxAuthMode: "device-code",
       });
       expect(updated).toMatchObject({
-        settingsVersion: 13,
+        settingsVersion: 14,
         knowledgeBackend: "adx",
         adxClusterUrl: "https://example.southcentralus.kusto.windows.net",
         adxDefaultDatabase: "client-database",
@@ -273,25 +298,47 @@ describe("default voice profile", () => {
   });
 
   it("normalizes an ADX portal link supplied through environment defaults", () => {
-    const previousCluster = process.env.ATSLA_ADX_CLUSTER_URL;
-    const previousDatabase = process.env.ATSLA_ADX_DEFAULT_DATABASE;
+    const previousCluster = process.env.ATLAS_ADX_CLUSTER_URL;
+    const previousDatabase = process.env.ATLAS_ADX_DEFAULT_DATABASE;
     try {
-      process.env.ATSLA_ADX_CLUSTER_URL = "https://dataexplorer.azure.com/clusters/example.southcentralus/databases/client-database";
-      delete process.env.ATSLA_ADX_DEFAULT_DATABASE;
+      process.env.ATLAS_ADX_CLUSTER_URL = "https://dataexplorer.azure.com/clusters/example.southcentralus/databases/client-database";
+      delete process.env.ATLAS_ADX_DEFAULT_DATABASE;
       expect(defaultSettings()).toMatchObject({
         adxClusterUrl: "https://example.southcentralus.kusto.windows.net",
         adxDefaultDatabase: "client-database",
       });
     } finally {
-      if (previousCluster === undefined) delete process.env.ATSLA_ADX_CLUSTER_URL;
-      else process.env.ATSLA_ADX_CLUSTER_URL = previousCluster;
-      if (previousDatabase === undefined) delete process.env.ATSLA_ADX_DEFAULT_DATABASE;
-      else process.env.ATSLA_ADX_DEFAULT_DATABASE = previousDatabase;
+      if (previousCluster === undefined) delete process.env.ATLAS_ADX_CLUSTER_URL;
+      else process.env.ATLAS_ADX_CLUSTER_URL = previousCluster;
+      if (previousDatabase === undefined) delete process.env.ATLAS_ADX_DEFAULT_DATABASE;
+      else process.env.ATLAS_ADX_DEFAULT_DATABASE = previousDatabase;
+    }
+  });
+
+  it("reads legacy ATSLA environment variables when ATLAS variables are absent", () => {
+    const previousAtlasCluster = process.env.ATLAS_ADX_CLUSTER_URL;
+    const previousAtlasDatabase = process.env.ATLAS_ADX_DEFAULT_DATABASE;
+    const previousLegacyCluster = process.env.ATSLA_ADX_CLUSTER_URL;
+    const previousLegacyDatabase = process.env.ATSLA_ADX_DEFAULT_DATABASE;
+    try {
+      delete process.env.ATLAS_ADX_CLUSTER_URL;
+      delete process.env.ATLAS_ADX_DEFAULT_DATABASE;
+      process.env.ATSLA_ADX_CLUSTER_URL = "https://legacy.southcentralus.kusto.windows.net";
+      process.env.ATSLA_ADX_DEFAULT_DATABASE = "legacy-public";
+      expect(defaultSettings()).toMatchObject({
+        adxClusterUrl: "https://legacy.southcentralus.kusto.windows.net",
+        adxDefaultDatabase: "legacy-public",
+      });
+    } finally {
+      restoreEnvironment("ATLAS_ADX_CLUSTER_URL", previousAtlasCluster);
+      restoreEnvironment("ATLAS_ADX_DEFAULT_DATABASE", previousAtlasDatabase);
+      restoreEnvironment("ATSLA_ADX_CLUSTER_URL", previousLegacyCluster);
+      restoreEnvironment("ATSLA_ADX_DEFAULT_DATABASE", previousLegacyDatabase);
     }
   });
 
   it("migrates the prior default theme and adds the Eva voice profile", () => {
-    const root = mkdtempSync(join(tmpdir(), "voice-bridge-atsla-theme-"));
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-atlas-theme-"));
     try {
       const path = join(root, "settings.json");
       const legacy = {
@@ -303,10 +350,15 @@ describe("default voice profile", () => {
       writeFileSync(path, JSON.stringify(legacy), "utf8");
 
       const migrated = new SettingsStore(path).get();
-      expect(migrated).toMatchObject({ settingsVersion: 13, appearanceTheme: "atsla" });
+      expect(migrated).toMatchObject({ settingsVersion: 14, appearanceTheme: "atlas" });
       expect(migrated.voiceProfiles.find((profile) => profile.id === "eva")?.instructions).toContain("warm, curious, and genuine");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 });
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}

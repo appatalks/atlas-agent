@@ -8,4 +8,4 @@ Use this fictional folder only when a database client needs additive reviewed fi
 3. Review `context-drop/CONTEXT-GUARDRAILS.md` before loading context.
 4. Attach the folder as **Supplementary session context** and choose **Load context** to merge it into the selected client's isolated cache.
 
-Do not put reusable public documentation here. Add it to the separately configured durable public knowledge folder. Keep real supplementary client folders outside this repository and do not commit client data or generated `.atsla/` databases.
+Do not put reusable public documentation here. Add it to the separately configured durable public knowledge folder. Keep real supplementary client folders outside this repository and do not commit client data or generated `.atlas/` databases.

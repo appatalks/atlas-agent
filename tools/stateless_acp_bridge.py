@@ -45,7 +45,7 @@ class AcpSession:
         self.request("initialize", {
             "protocolVersion": 1,
             "clientCapabilities": {},
-            "clientInfo": {"name": "atsla-support-live-agent", "title": "ATSLA Support Live Agent", "version": "1.0.0"},
+            "clientInfo": {"name": "atlas-live-agentic-support", "title": "ATLAS Live Agentic Support", "version": "1.0.0"},
         }, timeout=30)
         session = self.request("session/new", {"cwd": str(self.cwd), "mcpServers": []}, timeout=30)
         session_id = session.get("sessionId") if isinstance(session, dict) else None
@@ -109,7 +109,7 @@ class AcpSession:
         if method == "session/request_permission":
             result: dict[str, Any] = {"outcome": {"outcome": "denied"}}
         else:
-            result = {"error": {"code": -32601, "message": "ATSLA's stateless bridge does not support tools."}}
+            result = {"error": {"code": -32601, "message": "ATLAS's stateless bridge does not support tools."}}
         self.process.stdin.write((json.dumps({"jsonrpc": "2.0", "id": message["id"], **result}) + "\n").encode())
         self.process.stdin.flush()
 
@@ -193,10 +193,10 @@ def main() -> None:
     parser.add_argument("--cwd", type=Path, default=Path.cwd())
     parser.add_argument("--copilot-path", default="copilot")
     args = parser.parse_args()
-    handler = type("AtslaAcpHandler", (Handler,), {})
+    handler = type("AtlasAcpHandler", (Handler,), {})
     handler.service = BridgeService(args.copilot_path, args.cwd.resolve())
     server = ThreadingHTTPServer((args.bind, args.port), handler)
-    print(f"ATSLA stateless Copilot ACP bridge listening on http://{args.bind}:{args.port}", flush=True)
+    print(f"ATLAS stateless Copilot ACP bridge listening on http://{args.bind}:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

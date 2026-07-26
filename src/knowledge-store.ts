@@ -103,7 +103,7 @@ export interface PortableKnowledgePolicy {
 }
 
 export interface KnowledgeSnapshot {
-  format: "atsla-knowledge-snapshot";
+  format: "atlas-knowledge-snapshot" | "atsla-knowledge-snapshot";
   version: 1;
   scope: KnowledgeScope;
   scopeId: string;
@@ -438,7 +438,7 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
     const allProposals = this.listProposals("all");
     const proposals = allProposals.slice(0, maxSnapshotProposals);
     return {
-      format: "atsla-knowledge-snapshot",
+      format: "atlas-knowledge-snapshot",
       version: 1,
       scope: this.scope,
       scopeId: cleanScopeId,
@@ -628,11 +628,11 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
     if (!title || !content) throw new Error("Approved upsert proposals require a title and content.");
     const contentHash = hash(content);
     const existing = this.database.prepare("SELECT * FROM documents WHERE id = ?").get(documentId) as unknown as StoredDocumentRow | undefined;
-    const normalizedRequestedQuality = normalizeQuality(proposal.payload.quality, reviewedBy === "atsla-autonomous-review" ? "autonomous" : "operator", now);
-    const requestedQuality = reviewedBy === "atsla-autonomous-review"
+    const normalizedRequestedQuality = normalizeQuality(proposal.payload.quality, reviewedBy === "atlas-autonomous-review" ? "autonomous" : "operator", now);
+    const requestedQuality = reviewedBy === "atlas-autonomous-review"
       ? normalizedRequestedQuality
       : { ...normalizedRequestedQuality, authority: "operator" as const, confidence: Math.max(0.95, normalizedRequestedQuality.confidence) };
-    const quality = reviewedBy === "atsla-autonomous-review" && existing
+    const quality = reviewedBy === "atlas-autonomous-review" && existing
       ? mergeQuality(qualityFromRow(existing), requestedQuality)
       : requestedQuality;
     this.database.prepare(`
@@ -808,7 +808,7 @@ function normalizeScopeId(value: string): string {
 }
 
 function validateSnapshot(snapshot: KnowledgeSnapshot, expectedScope: KnowledgeScope): void {
-  if (snapshot.format !== "atsla-knowledge-snapshot" || snapshot.version !== 1) throw new Error("Unsupported knowledge snapshot format.");
+  if ((snapshot.format !== "atlas-knowledge-snapshot" && snapshot.format !== "atsla-knowledge-snapshot") || snapshot.version !== 1) throw new Error("Unsupported knowledge snapshot format.");
   if (snapshot.scope !== expectedScope) throw new Error(`Knowledge snapshot scope ${snapshot.scope} does not match ${expectedScope}.`);
   normalizeScopeId(snapshot.scopeId);
   for (const document of snapshot.documents) {

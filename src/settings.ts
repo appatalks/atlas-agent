@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
@@ -9,7 +9,8 @@ import { SqliteKnowledgeStore, type CreateKnowledgeProposal, type KnowledgeDocum
 
 const CLIENT_GUARDRAILS_FILE = "CONTEXT-GUARDRAILS.md";
 const GLOBAL_GUARDRAILS_FILE = "GLOBAL-GUARDRAILS.md";
-const KNOWLEDGE_DATA_FOLDER = ".atsla";
+const KNOWLEDGE_DATA_FOLDER = ".atlas";
+const LEGACY_KNOWLEDGE_DATA_FOLDER = ".atsla";
 const CLIENT_DATABASE_FILE = "client-knowledge.sqlite";
 const PUBLIC_DATABASE_FILE = "public-knowledge.sqlite";
 
@@ -70,7 +71,7 @@ export interface ClientConfiguration {
   supplementaryContextPath: string;
 }
 
-export type AppearanceTheme = "atsla" | "atelier" | "lcars" | "terminal" | "dark";
+export type AppearanceTheme = "atlas" | "atelier" | "lcars" | "terminal" | "dark";
 export const copilotReasoningEfforts = ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type CopilotReasoningEffort = typeof copilotReasoningEfforts[number];
 
@@ -87,7 +88,7 @@ export interface KnowledgeLoadResult extends KnowledgeSyncResult {
 }
 
 const defaultProfiles: AgentProfile[] = [
-  { id: "support", name: "AppaTalks Support Partner", tone: "calm and practical", voiceStyle: "clear and warm", instructions: "You are AppaTalks. ATSLA means AppaTalks Support Live Agent. Prioritize accurate troubleshooting, next steps, and concise summaries." },
+  { id: "support", name: "AppaTalks Support Partner", tone: "calm and practical", voiceStyle: "clear and warm", instructions: "You are AppaTalks. ATLAS means AppaTalks Live Agentic Support. Prioritize accurate troubleshooting, next steps, and concise summaries." },
   { id: "technical", name: "Technical Specialist", tone: "precise and direct", voiceStyle: "measured and confident", instructions: "Explain technical tradeoffs plainly, identify assumptions, and avoid unsupported certainty." },
   { id: "concierge", name: "Client Concierge", tone: "warm and collaborative", voiceStyle: "friendly and polished", instructions: "Keep the conversation constructive, organized, and focused on the client outcome." },
 ];
@@ -104,7 +105,7 @@ const defaultVoiceProfiles: VoiceProfile[] = [
   {
     id: "appatalks",
     name: "AppaTalks",
-    instructions: "You are AppaTalks, an expert GitHub Reliability Engineer. ATSLA means AppaTalks Support Live Agent. Speak with calm operational authority, prioritize service reliability, incident clarity, practical remediation, and accountable next steps. Use natural contractions, brief thoughtful pauses, varied sentence rhythm, and warm human phrasing without narrating internal reasoning.",
+    instructions: "You are AppaTalks, an expert GitHub Reliability Engineer. ATLAS means AppaTalks Live Agentic Support. Speak with calm operational authority, prioritize service reliability, incident clarity, practical remediation, and accountable next steps. Use natural contractions, brief thoughtful pauses, varied sentence rhythm, and warm human phrasing without narrating internal reasoning.",
     exaggeration: 0.65,
     cfgWeight: 0.35,
   },
@@ -113,13 +114,13 @@ const defaultVoiceProfiles: VoiceProfile[] = [
 
 export function defaultSettings(): VoiceBridgeSettings {
   const adxTarget = normalizeAdxTarget(
-    process.env.ATSLA_ADX_CLUSTER_URL ?? "",
-    process.env.ATSLA_ADX_DEFAULT_DATABASE ?? "",
+    atlasEnv("ADX_CLUSTER_URL") ?? "",
+    atlasEnv("ADX_DEFAULT_DATABASE") ?? "",
     false,
   );
   return {
-    settingsVersion: 13,
-    appearanceTheme: "atsla",
+    settingsVersion: 14,
+    appearanceTheme: "atlas",
     glassTransparency: 88,
     responseMode: "autonomous",
     defaultInputMode: "agent",
@@ -138,11 +139,11 @@ export function defaultSettings(): VoiceBridgeSettings {
     clientWorkspace: "",
     globalKnowledgePath: process.env.VOICE_BRIDGE_GLOBAL_KNOWLEDGE_PATH ?? join(homedir(), "Documents", "Voice Bridge Knowledge"),
     globalKnowledgeEnabled: true,
-    knowledgeBackend: process.env.ATSLA_KNOWLEDGE_BACKEND === "adx" ? "adx" : "sqlite",
+    knowledgeBackend: atlasEnv("KNOWLEDGE_BACKEND") === "adx" ? "adx" : "sqlite",
     adxClusterUrl: adxTarget.clusterUrl,
-    adxAuthMode: isAdxAuthMode(process.env.ATSLA_ADX_AUTH_MODE) ? process.env.ATSLA_ADX_AUTH_MODE : "azure-cli",
+    adxAuthMode: isAdxAuthMode(atlasEnv("ADX_AUTH_MODE")) ? atlasEnv("ADX_AUTH_MODE") as AdxAuthMode : "azure-cli",
     adxDefaultDatabase: adxTarget.defaultDatabase,
-    adxPublicDatabase: process.env.ATSLA_ADX_PUBLIC_DATABASE ?? "",
+    adxPublicDatabase: atlasEnv("ADX_PUBLIC_DATABASE") ?? "",
     retainSessionLearnings: true,
     saveMeetingLog: false,
     summarizeMeeting: true,
@@ -167,7 +168,7 @@ export class SettingsStore {
     const profiles = Array.isArray(partial.profiles) && partial.profiles.length ? partial.profiles.map(normalizeProfile) : this.value.profiles;
     const voiceProfiles = Array.isArray(partial.voiceProfiles) && partial.voiceProfiles.length ? partial.voiceProfiles.map(normalizeVoiceProfile) : this.value.voiceProfiles;
     const responseMode = isResponseMode(partial.responseMode) ? partial.responseMode : this.value.responseMode;
-    const appearanceTheme = isAppearanceTheme(partial.appearanceTheme) ? partial.appearanceTheme : this.value.appearanceTheme;
+    const appearanceTheme = normalizeAppearanceTheme(partial.appearanceTheme) ?? this.value.appearanceTheme;
     const defaultInputMode = partial.defaultInputMode === "operator" ? "operator" : partial.defaultInputMode === "agent" ? "agent" : this.value.defaultInputMode;
     const inputModel = typeof partial.inputModel === "string" ? partial.inputModel : this.value.inputModel;
     const copilotReasoningEffort = isCopilotReasoningEffort(partial.copilotReasoningEffort) ? partial.copilotReasoningEffort : this.value.copilotReasoningEffort;
@@ -219,19 +220,21 @@ export class SettingsStore {
     try {
       const stored = JSON.parse(readFileSync(this.settingsPath, "utf8")) as Partial<VoiceBridgeSettings>;
       const preV5 = !stored.settingsVersion || stored.settingsVersion < 5;
+      const storedAppearance = (stored as { appearanceTheme?: unknown }).appearanceTheme;
       const requiresAppaTalksMigration = isLegacyDefaultVoiceSelection(stored.voiceProfile) || stored.voiceProfiles?.some(isLegacyDefaultVoiceProfile);
-      const requiresMigration = stored.settingsVersion !== 13 || requiresAppaTalksMigration;
+      const requiresMigration = stored.settingsVersion !== 14 || requiresAppaTalksMigration || storedAppearance === "atsla";
       const migrated = requiresMigration
         ? {
           ...stored,
-          settingsVersion: 13,
-          ...(stored.appearanceTheme === "atelier" ? { appearanceTheme: "atsla" as const } : {}),
+          settingsVersion: 14,
+          ...(storedAppearance === "atelier" || storedAppearance === "atsla" ? { appearanceTheme: "atlas" as const } : {}),
           ...(preV5 ? { responseMode: "autonomous" as const, defaultInputMode: "agent" as const } : {}),
         }
         : stored;
       const migratedVoiceProfiles = (migrated.voiceProfiles?.length ? migrated.voiceProfiles : defaultVoiceProfiles)
         .map(normalizeVoiceProfile)
-        .map(migrateAppaTalksVoiceProfile);
+        .map(migrateAppaTalksVoiceProfile)
+        .map(migrateAtlasVoiceProfile);
       const voiceProfiles = ensureEvaVoiceProfile(migratedVoiceProfiles);
       for (const profile of voiceProfiles) {
         if (preV5 && profile.id === "appatalks" && !profile.instructions.includes("natural contractions")) {
@@ -243,6 +246,7 @@ export class SettingsStore {
       const value: VoiceBridgeSettings = {
         ...defaults,
         ...migrated,
+        appearanceTheme: normalizeAppearanceTheme(migrated.appearanceTheme) ?? defaults.appearanceTheme,
         ttsEngineUrl: normalizeTtsEngineUrl(migrated.ttsEngineUrl, defaults.ttsEngineUrl),
         voiceProfile: isLegacyDefaultVoiceSelection(migrated.voiceProfile) ? "AppaTalks" : migrated.voiceProfile ?? "AppaTalks",
         copilotReasoningEffort: isCopilotReasoningEffort(migrated.copilotReasoningEffort) ? migrated.copilotReasoningEffort : defaults.copilotReasoningEffort,
@@ -253,7 +257,7 @@ export class SettingsStore {
         adxPublicDatabase: typeof migrated.adxPublicDatabase === "string" ? migrated.adxPublicDatabase.trim().slice(0, 128) : defaults.adxPublicDatabase,
         clients: Array.isArray(migrated.clients) ? migrated.clients.map(normalizeClientConfiguration).filter(uniqueClient) : [],
         activeClientId: typeof migrated.activeClientId === "string" ? migrated.activeClientId : "",
-        profiles: (migrated.profiles?.length ? migrated.profiles : defaultProfiles).map(normalizeProfile).map(migrateAppaTalksAgentProfile),
+        profiles: (migrated.profiles?.length ? migrated.profiles : defaultProfiles).map(normalizeProfile).map(migrateAppaTalksAgentProfile).map(migrateAtlasAgentProfile),
         voiceProfiles,
       };
       if (value.activeClientId && !value.clients.some((client) => client.id === value.activeClientId)) value.activeClientId = value.clients[0]?.id ?? "";
@@ -279,7 +283,7 @@ export class ClientWorkspace {
   constructor(
     private readonly defaultRoot = process.env.VOICE_BRIDGE_CLIENTS_ROOT ?? join(homedir(), "Documents", "Voice Bridge Clients"),
     private readonly adxRepositoryFactory?: AdxRepositoryFactory,
-    private readonly knowledgeCacheRoot = process.env.ATSLA_KNOWLEDGE_CACHE_ROOT ?? join(defaultRoot, ".atsla-cache"),
+    private readonly knowledgeCacheRoot = defaultKnowledgeCacheRoot(defaultRoot),
   ) {
     mkdirSync(this.knowledgeCacheRoot, { recursive: true });
   }
@@ -330,7 +334,7 @@ export class ClientWorkspace {
       const pending: KnowledgeProposal[] = [];
       for (const plan of plans) {
         const proposal = store.createProposal(plan.input);
-        if (plan.autoApprove) promoted.push(store.reviewProposal(proposal.id, "approve", "atsla-autonomous-review"));
+        if (plan.autoApprove) promoted.push(store.reviewProposal(proposal.id, "approve", "atlas-autonomous-review"));
         else pending.push(proposal);
       }
       return { promoted, pending };
@@ -381,7 +385,7 @@ export class ClientWorkspace {
     }
     this.ensureClientProfile(folder, request.name);
     const contextReadme = join(folder, "context-drop", "README.md");
-    if (!existsSync(contextReadme)) writeFileSync(contextReadme, "# Bulk Context Drop\n\nDrop client reference files here. ATSLA reads `.md`, `.txt`, `.json`, `.csv`, `.yaml`, and `.yml` files after you explicitly load this client context. Maintain `CONTEXT-GUARDRAILS.md` in this folder to classify what may be discussed, what is sensitive, and what the agent must avoid.\n", "utf8");
+    if (!existsSync(contextReadme)) writeFileSync(contextReadme, "# Bulk Context Drop\n\nDrop client reference files here. ATLAS reads `.md`, `.txt`, `.json`, `.csv`, `.yaml`, and `.yml` files after you explicitly load this client context. Maintain `CONTEXT-GUARDRAILS.md` in this folder to classify what may be discussed, what is sensitive, and what the agent must avoid.\n", "utf8");
     const clientGuardrails = join(folder, "context-drop", CLIENT_GUARDRAILS_FILE);
     if (!existsSync(clientGuardrails)) writeFileSync(clientGuardrails, defaultClientGuardrails(), "utf8");
     return folder;
@@ -691,7 +695,7 @@ export class ClientWorkspace {
   }
 
   private clientDatabasePath(folder: string): string {
-    return folder ? join(folder, KNOWLEDGE_DATA_FOLDER, CLIENT_DATABASE_FILE) : "";
+    return folder ? join(knowledgeDataFolder(folder), CLIENT_DATABASE_FILE) : "";
   }
 
   private clientCachePath(clientId: string): string {
@@ -712,7 +716,7 @@ export class ClientWorkspace {
   }
 
   private publicDatabasePath(folder: string): string {
-    return folder ? join(folder, KNOWLEDGE_DATA_FOLDER, PUBLIC_DATABASE_FILE) : "";
+    return folder ? join(knowledgeDataFolder(folder), PUBLIC_DATABASE_FILE) : "";
   }
 
   private safePath(value: string, allowApprovedRoot = false): string {
@@ -763,22 +767,30 @@ function normalizeVoiceProfile(profile: VoiceProfile): VoiceProfile {
 
 function migrateAppaTalksVoiceProfile(profile: VoiceProfile): VoiceProfile {
   if (!isLegacyDefaultVoiceProfile(profile)) return profile;
-  const instructions = profile.instructions.replace(/atsla/gi, "AppaTalks").replace(/appatalks/gi, "AppaTalks");
+  const instructions = profile.instructions.replace(/atsla|atlas/gi, "AppaTalks").replace(/appatalks/gi, "AppaTalks");
   return {
     ...profile,
     id: "appatalks",
     name: "AppaTalks",
-    instructions: instructions.startsWith("You are AppaTalks") ? ensureAtslaExpansion(instructions) : ensureAtslaExpansion(`You are AppaTalks. ${instructions}`),
+    instructions: instructions.startsWith("You are AppaTalks") ? ensureAtlasExpansion(instructions) : ensureAtlasExpansion(`You are AppaTalks. ${instructions}`),
   };
 }
 
 function migrateAppaTalksAgentProfile(profile: AgentProfile): AgentProfile {
-  if (profile.id !== "support" || !["Support Partner", "Atsla Support Partner"].includes(profile.name)) return profile;
+  if (profile.id !== "support" || !["Support Partner", "Atsla Support Partner", "Atlas Support Partner"].includes(profile.name)) return profile;
   return {
     ...profile,
     name: "AppaTalks Support Partner",
-    instructions: profile.instructions.startsWith("You are AppaTalks") ? ensureAtslaExpansion(profile.instructions) : ensureAtslaExpansion(`You are AppaTalks. ${profile.instructions.replace(/atsla/gi, "AppaTalks")}`),
+    instructions: profile.instructions.startsWith("You are AppaTalks") ? ensureAtlasExpansion(profile.instructions) : ensureAtlasExpansion(`You are AppaTalks. ${profile.instructions.replace(/atsla|atlas/gi, "AppaTalks")}`),
   };
+}
+
+function migrateAtlasVoiceProfile(profile: VoiceProfile): VoiceProfile {
+  return { ...profile, instructions: migrateAtlasBrandText(profile.instructions) };
+}
+
+function migrateAtlasAgentProfile(profile: AgentProfile): AgentProfile {
+  return { ...profile, instructions: migrateAtlasBrandText(profile.instructions) };
 }
 
 function ensureEvaVoiceProfile(profiles: VoiceProfile[]): VoiceProfile[] {
@@ -787,15 +799,23 @@ function ensureEvaVoiceProfile(profiles: VoiceProfile[]): VoiceProfile[] {
 }
 
 function isLegacyDefaultVoiceSelection(value: string | undefined): boolean {
-  return value === "Atsla" || value === "atsla" || value === "Appatalks";
+  return value === "Atsla" || value === "atsla" || value === "Atlas" || value === "atlas" || value === "Appatalks";
 }
 
 function isLegacyDefaultVoiceProfile(profile: VoiceProfile): boolean {
-  return profile.id.toLowerCase() === "atsla" || profile.name === "Atsla" || profile.name === "Appatalks";
+  return profile.id.toLowerCase() === "atsla" || profile.id.toLowerCase() === "atlas" || profile.name === "Atsla" || profile.name === "Atlas" || profile.name === "Appatalks";
 }
 
-function ensureAtslaExpansion(instructions: string): string {
-  return /ATSLA means AppaTalks Support Live Agent/i.test(instructions) ? instructions : `${instructions} ATSLA means AppaTalks Support Live Agent.`;
+function ensureAtlasExpansion(instructions: string): string {
+  const migrated = migrateAtlasBrandText(instructions);
+  return /ATLAS means AppaTalks Live Agentic Support/i.test(migrated) ? migrated : `${migrated} ATLAS means AppaTalks Live Agentic Support.`;
+}
+
+function migrateAtlasBrandText(value: string): string {
+  return value
+    .replace(/ATSLA means AppaTalks Support Live Agent/gi, "ATLAS means AppaTalks Live Agentic Support")
+    .replace(/ATLAS means AppaTalks Live Agent Support/gi, "ATLAS means AppaTalks Live Agentic Support")
+    .replace(/\bATSLA\b/g, "ATLAS");
 }
 
 function clampVoiceNumber(value: number, fallback: number): number {
@@ -841,7 +861,12 @@ function clampTransparency(value: number): number {
 }
 
 function isAppearanceTheme(value: unknown): value is AppearanceTheme {
-  return value === "atsla" || value === "atelier" || value === "lcars" || value === "terminal" || value === "dark";
+  return value === "atlas" || value === "atelier" || value === "lcars" || value === "terminal" || value === "dark";
+}
+
+function normalizeAppearanceTheme(value: unknown): AppearanceTheme | undefined {
+  if (value === "atsla") return "atlas";
+  return isAppearanceTheme(value) ? value : undefined;
 }
 
 function isResponseMode(value: unknown): value is ResponseMode {
@@ -854,6 +879,32 @@ function isAdxAuthMode(value: unknown): value is AdxAuthMode {
 
 function isCopilotReasoningEffort(value: unknown): value is CopilotReasoningEffort {
   return typeof value === "string" && copilotReasoningEfforts.includes(value as CopilotReasoningEffort);
+}
+
+function atlasEnv(suffix: string): string | undefined {
+  return process.env[`ATLAS_${suffix}`] ?? process.env[`ATSLA_${suffix}`];
+}
+
+function defaultKnowledgeCacheRoot(defaultRoot: string): string {
+  const configured = atlasEnv("KNOWLEDGE_CACHE_ROOT")?.trim();
+  if (configured) return configured;
+  const canonical = join(defaultRoot, ".atlas-cache");
+  const legacy = join(defaultRoot, ".atsla-cache");
+  return migrateLegacyDirectory(legacy, canonical);
+}
+
+function knowledgeDataFolder(folder: string): string {
+  return migrateLegacyDirectory(join(folder, LEGACY_KNOWLEDGE_DATA_FOLDER), join(folder, KNOWLEDGE_DATA_FOLDER));
+}
+
+function migrateLegacyDirectory(legacy: string, canonical: string): string {
+  if (existsSync(canonical) || !existsSync(legacy)) return canonical;
+  try {
+    renameSync(legacy, canonical);
+    return canonical;
+  } catch {
+    return legacy;
+  }
 }
 
 function normalizeAdxTarget(clusterValue: string, databaseValue: string, strict = true): { clusterUrl: string; defaultDatabase: string } {
@@ -966,7 +1017,7 @@ This file is the operator-maintained policy for this client's bulk context.
 }
 
 function defaultGlobalGuardrails(): string {
-  return `# Global ATSLA Guardrails
+  return `# Global ATLAS Guardrails
 
 These rules apply to every session and every client workspace.
 

@@ -44,7 +44,7 @@ function result(rows: Array<Record<string, unknown>>): KustoResponseDataSet {
 
 function snapshot(scopeId = "northwind-client"): KnowledgeSnapshot {
   return {
-    format: "atsla-knowledge-snapshot",
+    format: "atlas-knowledge-snapshot",
     version: 1,
     scope: "client",
     scopeId,
@@ -103,7 +103,7 @@ describe("ADX knowledge repository", () => {
       versions: [{ content: "ADX_SNAPSHOT_CANARY", contentHash: "hash", sourceKind: "file-import", createdAt: "2026-07-25T12:00:00.000Z" }],
     }] };
     await repository.pushSnapshot("client-database", payload);
-    expect(client.management.some((item) => item.command.includes(".create-merge table AtslaKnowledgeSnapshots"))).toBe(true);
+    expect(client.management.some((item) => item.command.includes(".create-merge table AtlasKnowledgeSnapshots"))).toBe(true);
     const ingestRequest = client.management.find((item) => item.command.includes(".ingest inline"));
     expect(ingestRequest?.database).toBe("client-database");
     const ingest = ingestRequest?.command ?? "";
@@ -117,7 +117,7 @@ describe("ADX knowledge repository", () => {
     const client = new FakeAdxClient(["new-client"]);
     client.execute = async () => {
       const error = Object.assign(new Error("Request failed with status code 400"), {
-        response: { data: { error: { "@message": "Semantic error: Failed to resolve table named 'AtslaKnowledgeSnapshots'" } } },
+        response: { data: { error: { "@message": "Semantic error: Failed to resolve table named 'AtlasKnowledgeSnapshots'" } } },
       });
       throw error;
     };
@@ -126,8 +126,28 @@ describe("ADX knowledge repository", () => {
     await expect(repository.pullSnapshot("new-client", "client", "new-client")).resolves.toBeUndefined();
   });
 
+  it("reads a legacy ATSLA table and writes new snapshots to the ATLAS table", async () => {
+    const client = new FakeAdxClient(["legacy-client"]);
+    client.snapshots.set("legacy-client:client:northwind-client", { ...snapshot(), format: "atsla-knowledge-snapshot" });
+    const execute = client.execute.bind(client);
+    client.execute = async (database, query) => {
+      if (query.startsWith("AtlasKnowledgeSnapshots")) {
+        throw Object.assign(new Error("Request failed with status code 400"), {
+          response: { data: { error: { "@message": "Semantic error: Failed to resolve table named 'AtlasKnowledgeSnapshots'" } } },
+        });
+      }
+      expect(query.startsWith("AtslaKnowledgeSnapshots")).toBe(true);
+      return execute(database, query);
+    };
+    const repository = new AdxKnowledgeRepository({ clusterUrl: "https://example.southcentralus.kusto.windows.net", authMode: "azure-cli" }, client);
+
+    await expect(repository.pullSnapshot("legacy-client", "client", "northwind-client")).resolves.toMatchObject({ scopeId: "northwind-client" });
+    await repository.pushSnapshot("legacy-client", { ...snapshot(), format: "atlas-knowledge-snapshot" });
+    expect(client.management.some((item) => item.command.includes("AtlasKnowledgeSnapshots"))).toBe(true);
+  });
+
   it("materializes remote knowledge, refreshes local imports, and pushes the merged snapshot", async () => {
-    const root = mkdtempSync(join(tmpdir(), "atsla-adx-materialization-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-adx-materialization-"));
     const local = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
     const remoteSource = new SqliteKnowledgeStore("client", join(root, "remote.sqlite"));
     const fakeClient = new FakeAdxClient(["client-database"]);
@@ -165,7 +185,7 @@ describe("ADX knowledge repository", () => {
   });
 
   it("reserves the configured default database for public knowledge", async () => {
-    const root = mkdtempSync(join(tmpdir(), "atsla-adx-public-default-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-adx-public-default-"));
     const local = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
     const publicStore = new SqliteKnowledgeStore("public", join(root, "public.sqlite"));
     const fakeClient = new FakeAdxClient(["public-default"]);
@@ -188,7 +208,7 @@ describe("ADX knowledge repository", () => {
   });
 
   it("never constructs an ADX repository in SQLite mode", async () => {
-    const root = mkdtempSync(join(tmpdir(), "atsla-sqlite-backend-"));
+    const root = mkdtempSync(join(tmpdir(), "atlas-sqlite-backend-"));
     const local = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
     try {
       const backend = new KnowledgeBackendCoordinator({

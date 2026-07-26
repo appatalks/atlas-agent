@@ -8,7 +8,7 @@ const defaultTemplateRoot = new URL("../template-database-seed", import.meta.url
 
 export function buildTemplateSeed(clientId: string, templateRoot = resolve(defaultTemplateRoot.pathname)): KnowledgeSnapshot {
   const root = resolve(templateRoot);
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "atsla-template-seed-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "atlas-template-seed-"));
   const store = new SqliteKnowledgeStore("client", join(temporaryRoot, "seed.sqlite"));
   try {
     const documents = walk(root)
@@ -58,7 +58,7 @@ function main(): void {
     process.exit(clientId ? 0 : 2);
   }
   const snapshot = buildTemplateSeed(clientId, templateRoot);
-  const output = resolve(outputPath ?? `atsla-${clientId}-seed.json`);
+  const output = resolve(outputPath ?? `atlas-${clientId}-seed.json`);
   writeFileSync(output, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
   console.log(`Wrote ${snapshot.documents.length} seed documents for ${snapshot.scopeId} to ${output}`);
 }

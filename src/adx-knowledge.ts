@@ -46,7 +46,8 @@ export interface AdxClientLike {
   close(): void;
 }
 
-const snapshotsTable = "AtslaKnowledgeSnapshots";
+const snapshotsTable = "AtlasKnowledgeSnapshots";
+const legacySnapshotsTable = "AtslaKnowledgeSnapshots";
 const maxSnapshotBytes = 16 * 1024 * 1024;
 const azureDeveloperClientId = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
 const identityCacheService = "Microsoft.Developer.IdentityService";
@@ -94,28 +95,34 @@ export class AdxKnowledgeRepository {
 
   async pullSnapshot(database: string, scope: KnowledgeScope, scopeId: string): Promise<KnowledgeSnapshot | undefined> {
     const safeDatabase = validateAdxDatabaseName(database);
-    const query = `${snapshotsTable}
+    for (const table of [snapshotsTable, legacySnapshotsTable]) {
+      const rows = await this.querySnapshotRows(safeDatabase, table, scope, scopeId);
+      if (!rows?.length) continue;
+      const payload = String(rows[0].Payload ?? "");
+      const expectedHash = String(rows[0].ContentHash ?? "");
+      if (!payload || !expectedHash) throw new Error("ADX returned an incomplete knowledge snapshot record.");
+      const json = gunzipSync(Buffer.from(payload, "base64")).toString("utf8");
+      const actualHash = createHash("sha256").update(json).digest("hex");
+      if (actualHash !== expectedHash) throw new Error("ADX knowledge snapshot failed its content hash check.");
+      const snapshot = JSON.parse(json) as KnowledgeSnapshot;
+      validateRemoteSnapshot(snapshot, scope, scopeId);
+      return snapshot;
+    }
+    return undefined;
+  }
+
+  private async querySnapshotRows(database: string, table: string, scope: KnowledgeScope, scopeId: string): Promise<Array<{ Payload?: unknown; ContentHash?: unknown }> | undefined> {
+    const query = `${table}
 | where Scope == '${kqlString(scope)}' and ScopeId == '${kqlString(scopeId)}'
 | order by ExportedAt desc, Revision desc
 | take 1
 | project Payload, ContentHash`;
-    let rows: Array<{ Payload?: unknown; ContentHash?: unknown }>;
     try {
-      rows = resultRows(await this.client.execute(safeDatabase, query));
+      return resultRows(await this.client.execute(database, query));
     } catch (error) {
       if (isMissingTableError(error)) return undefined;
       throw error;
     }
-    if (!rows.length) return undefined;
-    const payload = String(rows[0].Payload ?? "");
-    const expectedHash = String(rows[0].ContentHash ?? "");
-    if (!payload || !expectedHash) throw new Error("ADX returned an incomplete knowledge snapshot record.");
-    const json = gunzipSync(Buffer.from(payload, "base64")).toString("utf8");
-    const actualHash = createHash("sha256").update(json).digest("hex");
-    if (actualHash !== expectedHash) throw new Error("ADX knowledge snapshot failed its content hash check.");
-    const snapshot = JSON.parse(json) as KnowledgeSnapshot;
-    validateRemoteSnapshot(snapshot, scope, scopeId);
-    return snapshot;
   }
 
   async resolveRoute(request: AdxRouteRequest): Promise<AdxResolvedRoute> {
@@ -254,7 +261,7 @@ function secureMsalCachePlugin(): ICachePlugin {
 
 function interactiveCredential(config: AdxKnowledgeConfig, clusterUrl: string): TokenCredential {
   const tenantId = config.tenantId?.trim() || "consumers";
-  const loginHint = process.env.ATSLA_ADX_LOGIN_HINT?.trim() || "";
+  const loginHint = (process.env.ATLAS_ADX_LOGIN_HINT ?? process.env.ATSLA_ADX_LOGIN_HINT)?.trim() || "";
   const key = `${clusterUrl}\0${tenantId}\0${loginHint}`;
   const cached = interactiveCredentials.get(key);
   if (cached) return cached;
@@ -280,8 +287,8 @@ function interactiveCredential(config: AdxKnowledgeConfig, clusterUrl: string): 
 function tokenCacheOptions(): { enabled: true; name: string; unsafeAllowUnencryptedStorage: boolean } {
   return {
     enabled: true,
-    name: "atsla-adx",
-    unsafeAllowUnencryptedStorage: process.env.ATSLA_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE === "true",
+    name: "atlas-adx",
+    unsafeAllowUnencryptedStorage: (process.env.ATLAS_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE ?? process.env.ATSLA_ADX_ALLOW_UNENCRYPTED_TOKEN_CACHE) === "true",
   };
 }
 
@@ -300,7 +307,7 @@ function databaseNameCandidates(value: string): string[] {
   const trimmed = value.trim();
   if (!trimmed) return [];
   const slug = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return [...new Set([trimmed, slug, `atsla-${slug}`].filter(Boolean))];
+  return [...new Set([trimmed, slug, `atlas-${slug}`, `atsla-${slug}`].filter(Boolean))];
 }
 
 function kqlString(value: string): string {
@@ -312,7 +319,7 @@ function csvField(value: string): string {
 }
 
 function validateRemoteSnapshot(snapshot: KnowledgeSnapshot, expectedScope?: KnowledgeScope, expectedScopeId?: string): void {
-  if (snapshot.format !== "atsla-knowledge-snapshot" || snapshot.version !== 1) throw new Error("Unsupported ADX knowledge snapshot format.");
+  if ((snapshot.format !== "atlas-knowledge-snapshot" && snapshot.format !== "atsla-knowledge-snapshot") || snapshot.version !== 1) throw new Error("Unsupported ADX knowledge snapshot format.");
   if (expectedScope && snapshot.scope !== expectedScope) throw new Error("ADX knowledge snapshot scope does not match the requested scope.");
   if (expectedScopeId && snapshot.scopeId !== expectedScopeId) throw new Error("ADX knowledge snapshot identifier does not match the requested scope.");
   if (!/^[a-z0-9][a-z0-9._-]{2,127}$/.test(snapshot.scopeId)) throw new Error("ADX knowledge snapshot has an invalid scope identifier.");
@@ -323,7 +330,7 @@ function isMissingTableError(error: unknown): boolean {
     ? (error as { response?: { data?: unknown } }).response?.data
     : undefined;
   const text = `${error instanceof Error ? error.message : String(error)} ${safeErrorJson(responseData)}`;
-  return /AtslaKnowledgeSnapshots|table.*not.*found|semantic error/i.test(text);
+  return /AtlasKnowledgeSnapshots|AtslaKnowledgeSnapshots|table.*not.*found|semantic error/i.test(text);
 }
 
 function safeErrorJson(value: unknown): string {

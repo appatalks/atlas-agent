@@ -1,5 +1,5 @@
 {
-  "name": "atsla-support-live-agent",
+  "name": "atlas-live-agentic-support",
   "version": "0.1.0",
   "description": "Local, operator-controlled AI support agent for live conversations",
   "main": "desktop/main.cjs",
@@ -24,7 +24,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/appatalks/atsla-support-live-agent.git"
+    "url": "git+https://github.com/appatalks/atlas-live-agentic-support.git"
   },
   "keywords": [],
   "author": "",
@@ -34,9 +34,9 @@
   },
   "type": "module",
   "bugs": {
-    "url": "https://github.com/appatalks/atsla-support-live-agent/issues"
+    "url": "https://github.com/appatalks/atlas-live-agentic-support/issues"
   },
-  "homepage": "https://github.com/appatalks/atsla-support-live-agent#readme",
+  "homepage": "https://github.com/appatalks/atlas-live-agentic-support#readme",
   "dependencies": {
     "@azure/core-auth": "^1.11.0",
     "@azure/identity": "^4.13.1",

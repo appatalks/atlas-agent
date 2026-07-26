@@ -133,7 +133,7 @@ export class MeetingCoordinator {
   async draft(question: string): Promise<{ draft: Draft; dispatch?: SpeechDispatch }> {
     const epoch = this.responseEpoch;
     this.record("thinking", "Preparing a response.");
-    const identityReply = atslaIdentityReply(question, this.transcript);
+    const identityReply = atlasIdentityReply(question, this.transcript);
     const reply = identityReply ?? await this.provider.complete({ transcript: this.transcript, question: this.enrichQuestion(question) });
     if (!identityReply) this.recordUsage(reply);
     if (isSilentModelReply(reply.text)) {
@@ -887,15 +887,16 @@ function isOperatorEscalation(text: string): boolean {
   return /\b(?:escalat(?:e|es|ed|ing)|transfer|route|hand(?:ing)?\s+(?:this\s+)?(?:over|off))\b.{0,100}\b(?:operator|supervisor|human|live\s+(?:agent|representative)|representative)\b/i.test(text);
 }
 
-function atslaIdentityReply(question: string, transcript: TranscriptEvent[]): ModelReply | undefined {
+function atlasIdentityReply(question: string, transcript: TranscriptEvent[]): ModelReply | undefined {
   const latestRemoteText = transcript.filter((event) => event.speaker === "remote").at(-1)?.text ?? "";
   const text = `${question} ${latestRemoteText}`.toLowerCase();
-  const namesAtsla = /\ba[\s-]*t[\s-]*s[\s-]*l[\s-]*a\b/.test(text);
+  const namesAtlas = /\ba[\s-]*t[\s-]*l[\s-]*a[\s-]*s\b/.test(text);
+  const namesLegacyAtlas = /\ba[\s-]*t[\s-]*s[\s-]*l[\s-]*a\b/.test(text);
   const asksForMeaning = /\b(what(?:'s| is| does)?|mean(?:ing)?|stand(?:s)? for)\b/.test(text);
-  if (!namesAtsla || !asksForMeaning) return undefined;
+  if ((!namesAtlas && !namesLegacyAtlas) || !asksForMeaning) return undefined;
   return {
-    text: "ATSLA means AppaTalks Support Live Agent.",
+    text: "ATLAS means AppaTalks Live Agentic Support.",
     provider: "local-qwen",
-    model: "atsla-identity",
+    model: "atlas-identity",
   };
 }

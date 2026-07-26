@@ -127,9 +127,9 @@ function defaultRepositoryFactory(config: KnowledgeBackendConfig): AdxRepository
   return new AdxKnowledgeRepository({
     clusterUrl: config.adxClusterUrl,
     authMode: config.adxAuthMode,
-    tenantId: process.env.ATSLA_ADX_TENANT_ID,
-    managedIdentityClientId: process.env.ATSLA_ADX_MANAGED_IDENTITY_CLIENT_ID,
-    applicationClientId: process.env.ATSLA_ADX_APPLICATION_CLIENT_ID,
-    applicationClientSecret: process.env.ATSLA_ADX_APPLICATION_CLIENT_SECRET,
+    tenantId: process.env.ATLAS_ADX_TENANT_ID ?? process.env.ATSLA_ADX_TENANT_ID,
+    managedIdentityClientId: process.env.ATLAS_ADX_MANAGED_IDENTITY_CLIENT_ID ?? process.env.ATSLA_ADX_MANAGED_IDENTITY_CLIENT_ID,
+    applicationClientId: process.env.ATLAS_ADX_APPLICATION_CLIENT_ID ?? process.env.ATSLA_ADX_APPLICATION_CLIENT_ID,
+    applicationClientSecret: process.env.ATLAS_ADX_APPLICATION_CLIENT_SECRET ?? process.env.ATSLA_ADX_APPLICATION_CLIENT_SECRET,
   });
 }
