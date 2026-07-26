@@ -5,7 +5,9 @@ SOURCE="${VOICE_BRIDGE_CONFERENCE_SOURCE:-voice_bridge_conference.monitor}"
 API_URL="${VOICE_BRIDGE_API_URL:-http://127.0.0.1:4173}"
 WHISPER_BIN="${WHISPER_BIN:-whisper-cli}"
 WHISPER_MODEL="${WHISPER_MODEL:-}"
+WHISPER_LIBRARY_PATH="${WHISPER_LIBRARY_PATH:-$(dirname "$WHISPER_BIN")}"
 SEGMENT_SECONDS="${VOICE_BRIDGE_SEGMENT_SECONDS:-4}"
+MAX_TURN_SEGMENTS="${VOICE_BRIDGE_MAX_TURN_SEGMENTS:-5}"
 WORK_DIR="${XDG_RUNTIME_DIR:-/tmp}/voice-bridge-transcription"
 SILENCE_DB="${VOICE_BRIDGE_SILENCE_DB:--45}"
 
@@ -26,6 +28,8 @@ check() {
   command -v jq >/dev/null || { echo "Missing jq." >&2; return 1; }
   command -v "$WHISPER_BIN" >/dev/null || { echo "Missing $WHISPER_BIN. Run tools/bootstrap-whisper.sh or set WHISPER_BIN." >&2; return 1; }
   [[ -n "$WHISPER_MODEL" && -f "$WHISPER_MODEL" ]] || { echo "WHISPER_MODEL must name an existing ggml Whisper model." >&2; return 1; }
+  env LD_LIBRARY_PATH="$WHISPER_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$WHISPER_BIN" --help >/dev/null 2>&1 || { echo "Whisper CLI cannot start. Check WHISPER_LIBRARY_PATH and shared libraries." >&2; return 1; }
+  [[ "$MAX_TURN_SEGMENTS" =~ ^[1-9][0-9]*$ ]] || { echo "VOICE_BRIDGE_MAX_TURN_SEGMENTS must be a positive integer." >&2; return 1; }
   echo "Whisper capture prerequisites are available."
 }
 
@@ -50,6 +54,7 @@ rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 touch "$WORK_DIR/processed.txt"
 pending_text=""
+pending_segments=0
 
 deliver_pending() {
   [[ -n "${pending_text// }" ]] || return 0
@@ -58,6 +63,7 @@ deliver_pending() {
   curl --fail --silent --show-error -X POST "$API_URL/v1/transcripts" -H 'content-type: application/json' -d "$payload" >/dev/null || \
     echo "Could not deliver transcript to Voice Bridge." >&2
   pending_text=""
+  pending_segments=0
 }
 
 CAPTURE_PID=""
@@ -87,8 +93,9 @@ process_segments() {
         deliver_pending
         continue
       fi
-      if ! text="$($WHISPER_BIN -m "$WHISPER_MODEL" -f "$chunk" -nt 2>/dev/null | sed '/^$/d' | tr '\n' ' ')"; then
+      if ! text="$(env LD_LIBRARY_PATH="$WHISPER_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$WHISPER_BIN" -m "$WHISPER_MODEL" -f "$chunk" -nt 2>"$WORK_DIR/whisper-error.log" | sed '/^$/d' | tr '\n' ' ')"; then
         echo "Whisper failed for $chunk; continuing capture." >&2
+        tail -n 3 "$WORK_DIR/whisper-error.log" >&2 || true
         printf '%s\n' "$chunk" >> "$WORK_DIR/processed.txt"
         continue
       fi
@@ -96,6 +103,11 @@ process_segments() {
       text="$(printf '%s' "$text" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
       [[ -n "$text" ]] || continue
       pending_text="${pending_text:+$pending_text }$text"
+      ((pending_segments += 1))
+      if (( pending_segments >= MAX_TURN_SEGMENTS )); then
+        echo "Flushing continuous input after $pending_segments segments." >&2
+        deliver_pending
+      fi
     done < "$segment_list"
   fi
 }

@@ -18,5 +18,8 @@ describe("transcription turn assembly", () => {
     expect(script).toContain("start_capture() {");
     expect(script).toContain("Conference capture exited with status $capture_status; restarting.");
     expect(script).toContain("Whisper failed for $chunk; continuing capture.");
+    expect(script).toContain('LD_LIBRARY_PATH="$WHISPER_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"');
+    expect(script).toContain('MAX_TURN_SEGMENTS="${VOICE_BRIDGE_MAX_TURN_SEGMENTS:-5}"');
+    expect(script).toContain("Flushing continuous input after $pending_segments segments.");
   });
 });
