@@ -64,7 +64,7 @@ describe("client workspace", () => {
     symlinkSync("/etc", join(root, "escaped"));
     const workspace = new ClientWorkspace(join(root, "clients"));
 
-    expect(() => workspace.select({ path: join(root, "escaped", "atlas-client") })).toThrow("Workspace paths must be inside");
+    expect(() => workspace.select({ path: join(root, "escaped", "atlas-client") })).toThrow("must not escape through symbolic links");
   });
 
   it("persists an explicit ADX route against the stable client identity", () => {

@@ -732,13 +732,15 @@ export class ClientWorkspace {
   }
 
   private safePath(value: string, allowApprovedRoot = false): string {
-    const folder = canonicalProspectivePath(value);
-    const configuredRoot = canonicalProspectivePath(this.defaultRoot);
-    const allowedRoots = [realpathSync(homedir()), configuredRoot, canonicalProspectivePath(resolve(configuredRoot, ".."))];
-    if (!allowedRoots.some((root) => isPathWithin(root, folder, allowApprovedRoot))) {
+    const folder = resolve(value);
+    const configuredRoot = resolve(this.defaultRoot);
+    const allowedRoot = [resolve(homedir()), configuredRoot, resolve(configuredRoot, "..")]
+      .filter((root) => isPathWithin(root, folder, allowApprovedRoot))
+      .sort((left, right) => right.length - left.length)[0];
+    if (!allowedRoot) {
       throw new Error("Workspace paths must be inside your home directory or the configured client workspace root.");
     }
-    return folder;
+    return canonicalPathWithinRoot(allowedRoot, folder);
   }
 }
 
@@ -964,12 +966,33 @@ function isPathWithin(root: string, path: string, allowRoot: boolean): boolean {
   return (allowRoot || Boolean(pathFromRoot)) && !pathFromRoot.startsWith("..") && !pathFromRoot.startsWith("/");
 }
 
-function canonicalProspectivePath(value: string): string {
-  let existing = resolve(value);
+function canonicalPathWithinRoot(root: string, target: string): string {
+  const pathFromRoot = relative(root, target);
+  const safeSegments = pathFromRoot.split(/[\\/]+/).filter(Boolean).map((segment) => {
+    const safeSegment = basename(segment);
+    if (safeSegment !== segment || safeSegment === "." || safeSegment === "..") throw new Error("Workspace path contains an invalid segment.");
+    return safeSegment;
+  });
+  const canonicalRoot = canonicalTrustedPath(root);
+  let existing = resolve(canonicalRoot, ...safeSegments);
   const suffix: string[] = [];
   while (!existsSync(existing)) {
     const parent = dirname(existing);
     if (parent === existing) throw new Error("Workspace path has no accessible parent directory.");
+    suffix.unshift(basename(existing));
+    existing = parent;
+  }
+  const canonicalTarget = resolve(realpathSync(existing), ...suffix);
+  if (!isPathWithin(canonicalRoot, canonicalTarget, true)) throw new Error("Workspace paths must not escape through symbolic links.");
+  return canonicalTarget;
+}
+
+function canonicalTrustedPath(value: string): string {
+  let existing = resolve(value);
+  const suffix: string[] = [];
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) throw new Error("Workspace root has no accessible parent directory.");
     suffix.unshift(basename(existing));
     existing = parent;
   }
