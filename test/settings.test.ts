@@ -153,7 +153,7 @@ describe("default voice profile", () => {
       const store = new SettingsStore(path);
       store.update({ copilotReasoningEffort: "xhigh" });
 
-      expect(new SettingsStore(path).get()).toMatchObject({ settingsVersion: 15, copilotReasoningEffort: "xhigh" });
+      expect(new SettingsStore(path).get()).toMatchObject({ settingsVersion: 16, copilotReasoningEffort: "xhigh" });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -209,7 +209,7 @@ describe("default voice profile", () => {
       writeFileSync(path, JSON.stringify(legacy), "utf8");
       const migrated = new SettingsStore(path).get();
 
-      expect(migrated.settingsVersion).toBe(15);
+      expect(migrated.settingsVersion).toBe(16);
       expect(migrated.responseMode).toBe("autonomous");
       expect(migrated.defaultInputMode).toBe("agent");
     } finally {
@@ -285,7 +285,7 @@ describe("default voice profile", () => {
         adxAuthMode: "device-code",
       });
       expect(updated).toMatchObject({
-        settingsVersion: 15,
+        settingsVersion: 16,
         knowledgeBackend: "adx",
         adxClusterUrl: "https://example.southcentralus.kusto.windows.net",
         adxDefaultDatabase: "client-database",
@@ -358,8 +358,9 @@ describe("default voice profile", () => {
       writeFileSync(path, JSON.stringify(legacy), "utf8");
 
       const migrated = new SettingsStore(path).get();
-      expect(migrated).toMatchObject({ settingsVersion: 15, appearanceTheme: "atlas" });
+      expect(migrated).toMatchObject({ settingsVersion: 16, appearanceTheme: "atlas" });
       expect(migrated.voiceProfiles.find((profile) => profile.id === "eva")?.instructions).toContain("warm, curious, and genuine");
+      expect(migrated.voiceProfiles.find((profile) => profile.id === "small-talk-agent")?.ttsProfileId).toBe("appatalks");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

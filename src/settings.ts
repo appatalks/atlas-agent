@@ -130,7 +130,7 @@ export function defaultSettings(): VoiceBridgeSettings {
     false,
   );
   return {
-    settingsVersion: 15,
+    settingsVersion: 16,
     appearanceTheme: "atlas",
     glassTransparency: 88,
     responseMode: "autonomous",
@@ -233,11 +233,11 @@ export class SettingsStore {
       const preV5 = !stored.settingsVersion || stored.settingsVersion < 5;
       const storedAppearance = (stored as { appearanceTheme?: unknown }).appearanceTheme;
       const requiresAppaTalksMigration = isLegacyDefaultVoiceSelection(stored.voiceProfile) || stored.voiceProfiles?.some(isLegacyDefaultVoiceProfile);
-      const requiresMigration = stored.settingsVersion !== 15 || requiresAppaTalksMigration || storedAppearance === "atsla";
+      const requiresMigration = stored.settingsVersion !== 16 || requiresAppaTalksMigration || storedAppearance === "atsla";
       const migrated = requiresMigration
         ? {
           ...stored,
-          settingsVersion: 15,
+          settingsVersion: 16,
           ...(storedAppearance === "atelier" || storedAppearance === "atsla" ? { appearanceTheme: "atlas" as const } : {}),
           ...(preV5 ? { responseMode: "autonomous" as const, defaultInputMode: "agent" as const } : {}),
         }
@@ -809,8 +809,11 @@ function ensureBuiltInVoiceProfiles(profiles: VoiceProfile[]): VoiceProfile[] {
   const withEva = profiles.some((profile) => profile.id === "eva" || profile.name === "Eva")
     ? profiles
     : [...profiles, { ...evaVoiceProfile }];
-  if (withEva.some((profile) => profile.id === smallTalkVoiceProfile.id || profile.name === smallTalkVoiceProfile.name)) return withEva;
-  return [...withEva, { ...smallTalkVoiceProfile }];
+  const withSmallTalk = withEva.map((profile) => profile.id === smallTalkVoiceProfile.id || profile.name === smallTalkVoiceProfile.name
+    ? { ...profile, ttsProfileId: smallTalkVoiceProfile.ttsProfileId }
+    : profile);
+  if (withSmallTalk.some((profile) => profile.id === smallTalkVoiceProfile.id || profile.name === smallTalkVoiceProfile.name)) return withSmallTalk;
+  return [...withSmallTalk, { ...smallTalkVoiceProfile }];
 }
 
 function isLegacyDefaultVoiceSelection(value: string | undefined): boolean {
