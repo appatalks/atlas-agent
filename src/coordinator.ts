@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
-import { CUSTOMER_FEEDBACK_REQUEST, NO_RESPONSE_SENTINEL, responseTemplates, type AgentActivity, type ChatProvider, type Draft, type EscalationRequest, type LocalModelId, type MeetingSession, type MeetingSessionSummary, type ModelReply, type ResponseMode, type SessionCompletion, type SessionResolution, type SessionTelemetry, type TranscriptEvent } from "./domain.js";
+import { BACKCHANNEL_ACKNOWLEDGEMENTS, CUSTOMER_FEEDBACK_REQUEST, NO_RESPONSE_SENTINEL, responseTemplates, type AgentActivity, type ChatProvider, type Draft, type EscalationRequest, type LocalModelId, type MeetingSession, type MeetingSessionSummary, type ModelReply, type ResponseMode, type SessionCompletion, type SessionResolution, type SessionTelemetry, type TranscriptEvent } from "./domain.js";
 import { DraftStore, ResponsePolicy } from "./policy.js";
 import { type VoiceBridgeSettings, type ClientConfiguration, type CopilotReasoningEffort, ClientWorkspace, SettingsStore, defaultSettings, knowledgeBackendConfig, publicKnowledgeBackendConfig } from "./settings.js";
 import { type SpeechDispatch, type SpeechOutput } from "./voice.js";
@@ -34,6 +34,7 @@ export class MeetingCoordinator {
   private autonomousInFlight = false;
   private autonomousTimer: NodeJS.Timeout | undefined;
   private responseEpoch = 0;
+  private backchannelIndex = 0;
   private settings: VoiceBridgeSettings;
   private loadedClientId = "";
   private activeSession: MeetingSession | undefined;
@@ -134,8 +135,19 @@ export class MeetingCoordinator {
     const epoch = this.responseEpoch;
     this.record("thinking", "Preparing a response.");
     const identityReply = atlasIdentityReply(question, this.transcript);
-    const reply = identityReply ?? await this.provider.complete({ transcript: this.transcript, question: this.enrichQuestion(question) });
+    let reply = identityReply ?? await this.provider.complete({ transcript: this.transcript, question: this.enrichQuestion(question) });
     if (!identityReply) this.recordUsage(reply);
+    const latestRemoteText = this.transcript.filter((event) => event.speaker === "remote").at(-1)?.text ?? "";
+    const actionableText = latestRemoteText || question;
+    if (!identityReply && isSilentModelReply(reply.text) && requiresSubstantiveResponse(actionableText)) {
+      this.record("thinking", "The model passed on an actionable customer turn; retrying with a required response.");
+      const retry = await this.provider.complete({
+        transcript: this.transcript,
+        question: this.enrichQuestion("The latest customer turn is actionable. You must respond now. Answer from approved public and active-client context. If evidence is insufficient, ask one focused clarifying question. If safe assistance is not possible, explain that a live representative is needed. Never output [[NO_RESPONSE]]."),
+      });
+      this.recordUsage(retry);
+      reply = isSilentModelReply(retry.text) ? actionableFallback(reply) : retry;
+    }
     if (isSilentModelReply(reply.text)) {
       const draft = this.drafts.create(question, { ...reply, text: NO_RESPONSE_SENTINEL }, "dismissed");
       this.record("stopped", "Agent passed without speaking because no helpful contribution was needed.", draft.id);
@@ -670,7 +682,14 @@ export class MeetingCoordinator {
     this.autonomousInFlight = true;
     this.lastAutonomousReplyAt = Date.now();
     try {
-      await this.draft("Respond to the most recent remote turn only when a helpful contribution is appropriate. Keep the response to one concise sentence.");
+      const result = await this.draft("Respond to the most recent remote turn only when a helpful contribution is appropriate. Keep the response to one concise sentence.");
+      const latestRemoteText = this.transcript.filter((event) => event.speaker === "remote").at(-1)?.text ?? "";
+      if (result.draft.reply.text === NO_RESPONSE_SENTINEL && shouldBackchannel(latestRemoteText)) {
+        const acknowledgement = BACKCHANNEL_ACKNOWLEDGEMENTS[this.backchannelIndex % BACKCHANNEL_ACKNOWLEDGEMENTS.length];
+        this.backchannelIndex += 1;
+        await this.speakTemplate(acknowledgement);
+        this.record("speaking", `Conversational acknowledgement: ${acknowledgement}`);
+      }
     } catch (error) {
       this.record("error", error instanceof Error ? error.message : "Autonomous response failed.");
     } finally {
@@ -881,6 +900,30 @@ export function isNonActionableTranscript(text: string): boolean {
 function isSilentModelReply(text: string): boolean {
   const normalized = text.trim();
   return normalized === NO_RESPONSE_SENTINEL || /^no helpful contribution needed\b/i.test(normalized) || /^no response needed\b/i.test(normalized);
+}
+
+function shouldBackchannel(text: string): boolean {
+  const normalized = text.trim();
+  if (isNonActionableTranscript(normalized) || normalized.length < 3 || normalized.length > 320) return false;
+  if (/[?]$/.test(normalized) || /^(?:who|what|when|where|why|how|can|could|would|will|do|does|did|is|are|am|should|may)\b/i.test(normalized)) return false;
+  if (/\b(?:help|issue|problem|error|failed?|failure|broken|cannot|can't|need|urgent|outage|security|billing|account|password|token|escalat|representative|support)\b/i.test(normalized)) return false;
+  if (/[♪♫]|\b(?:music|lyrics?|applause|background noise|inaudible)\b/i.test(normalized)) return false;
+  return !isCompletionIntent(normalized);
+}
+
+function requiresSubstantiveResponse(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized || isNonActionableTranscript(normalized)) return false;
+  if (/[?]$/.test(normalized) || /^(?:who|what|when|where|why|how|can|could|would|will|do|does|did|is|are|am|should|may)\b/i.test(normalized)) return true;
+  return /\b(?:help|issue|problem|error|failed?|failure|broken|cannot|can't|need|urgent|outage|security|billing|account|password|token|escalat|representative|support|troubleshoot|question)\b/i.test(normalized);
+}
+
+function actionableFallback(reply: ModelReply): ModelReply {
+  return {
+    text: "I want to help, but I need one more detail to proceed safely. What specific error or behavior are you seeing?",
+    provider: reply.provider,
+    model: "atlas-actionable-fallback",
+  };
 }
 
 function isOperatorEscalation(text: string): boolean {

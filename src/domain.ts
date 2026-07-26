@@ -28,6 +28,7 @@ export type Speaker = "remote" | "local" | "agent";
 export const NO_RESPONSE_SENTINEL = "[[NO_RESPONSE]]";
 export const STANDARD_GREETING = "Hi, I am AppaTalks, your AI support agent. I can help with support questions and next steps. If you would like a live representative, say Live Representative Please and I will notify one. How can I help today?";
 export const CUSTOMER_FEEDBACK_REQUEST = "Before we wrap up, did this resolve your issue? You can answer yes or no, and optionally rate this support from one to five.";
+export const BACKCHANNEL_ACKNOWLEDGEMENTS = ["Mm-hmm.", "I understand."] as const;
 
 export interface TranscriptEvent {
   id: string;

@@ -86,13 +86,17 @@ start() {
   local voice_reference="${VOICE_CLONE_REFERENCE:-$ROOT_DIR/assets/voices/appatalks-voice.wav}"
   local eva_reference="${EVA_VOICE_REFERENCE:-$ROOT_DIR/assets/voices/eva-voice.wav}"
   local greeting_seed="$ROOT_DIR/assets/prewarmed/appatalks-standard-greeting.wav"
+  local backchannel_mm_hmm_seed="$ROOT_DIR/assets/prewarmed/appatalks-backchannel-mm-hmm.wav"
+  local backchannel_understand_seed="$ROOT_DIR/assets/prewarmed/appatalks-backchannel-understand.wav"
   local greeting_seed_reference_sha256="92ad8aa65c4237a1999a65ab775731088af46831fc94e6944ec92b1887c93fbf"
   local standard_greeting="Hi, I am AppaTalks, your AI support agent. I can help with support questions and next steps. If you would like a live representative, say Live Representative Please and I will notify one. How can I help today?"
+  local backchannel_mm_hmm="Mm-hmm."
+  local backchannel_understand="I understand."
   launch qwen env VOICE_BRIDGE_QWEN_MODEL="${VOICE_BRIDGE_QWEN_MODEL:-qwen3-8b}" VOICE_CLONE_DEVICE="${VOICE_CLONE_DEVICE:-auto}" "$python" "$ROOT_DIR/tools/qwen_bridge.py"
   case "$tts_mode" in
     local)
       voice_url="http://127.0.0.1:8090/"
-      launch voice env PYTHONPATH="$voice_module_source${PYTHONPATH:+:$PYTHONPATH}" VOICE_BRIDGE_TTS_AUTH_TOKEN="${VOICE_BRIDGE_TTS_AUTH_TOKEN:-}" "$python" "$ROOT_DIR/tools/local_voice_bridge.py" --host 127.0.0.1 --port 8090 --reference "$voice_reference" --eva-reference "$eva_reference" --seed-audio "$greeting_seed" --seed-reference-sha256 "$greeting_seed_reference_sha256" --warm-text "$standard_greeting" --warm-exaggeration 0.65 --warm-cfg-weight 0.35
+      launch voice env PYTHONPATH="$voice_module_source${PYTHONPATH:+:$PYTHONPATH}" VOICE_BRIDGE_TTS_AUTH_TOKEN="${VOICE_BRIDGE_TTS_AUTH_TOKEN:-}" "$python" "$ROOT_DIR/tools/local_voice_bridge.py" --host 127.0.0.1 --port 8090 --reference "$voice_reference" --eva-reference "$eva_reference" --seed-audio "$greeting_seed" --seed-reference-sha256 "$greeting_seed_reference_sha256" --warm-text "$standard_greeting" --warm-text "$backchannel_mm_hmm" --seed-text-audio "$backchannel_mm_hmm" "$backchannel_mm_hmm_seed" --warm-text "$backchannel_understand" --seed-text-audio "$backchannel_understand" "$backchannel_understand_seed" --warm-exaggeration 0.65 --warm-cfg-weight 0.35
       ;;
     remote)
       voice_url="${VOICE_BRIDGE_REMOTE_TTS_URL:-}"

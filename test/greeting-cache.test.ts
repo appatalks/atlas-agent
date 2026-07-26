@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { STANDARD_GREETING } from "../src/domain.js";
+import { BACKCHANNEL_ACKNOWLEDGEMENTS, STANDARD_GREETING } from "../src/domain.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -15,9 +15,14 @@ describe("AppaTalks Standard Greeting cache", () => {
     expect(supervisor).toContain("--eva-reference \"$eva_reference\"");
     expect(supervisor).toContain("--seed-audio \"$greeting_seed\"");
     expect(existsSync(`${root}/assets/prewarmed/appatalks-standard-greeting.wav`)).toBe(true);
+    expect(existsSync(`${root}/assets/prewarmed/appatalks-backchannel-mm-hmm.wav`)).toBe(true);
+    expect(existsSync(`${root}/assets/prewarmed/appatalks-backchannel-understand.wav`)).toBe(true);
     expect(existsSync(`${root}/assets/voices/appatalks-voice.wav`)).toBe(true);
     expect(existsSync(`${root}/assets/voices/eva-voice.wav`)).toBe(true);
     expect(supervisor).toContain('assets/voices/appatalks-voice.wav');
+    expect(BACKCHANNEL_ACKNOWLEDGEMENTS).toEqual(["Mm-hmm.", "I understand."]);
+    expect(supervisor).toContain('--seed-text-audio "$backchannel_mm_hmm" "$backchannel_mm_hmm_seed"');
+    expect(supervisor).toContain('--seed-text-audio "$backchannel_understand" "$backchannel_understand_seed"');
     expect(supervisor).toContain('PYTHONPATH="$voice_module_source${PYTHONPATH:+:$PYTHONPATH}"');
   });
 
@@ -26,6 +31,7 @@ describe("AppaTalks Standard Greeting cache", () => {
     expect(bridge).toContain("if cache_path and cache_path.is_file()");
     expect(bridge).toContain('"reference_mtime_ns"');
     expect(bridge).toContain("self.warm_texts.add(text)");
+    expect(bridge).toContain("self.seed_audio_by_text.get(text)");
     expect(bridge).toContain('"voice_profiles"');
     expect(bridge).toContain('profile_id == "appatalks"');
     expect(bridge).toContain("seed_reference_sha256");

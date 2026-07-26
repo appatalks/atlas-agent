@@ -146,13 +146,61 @@ describe("non-speech response suppression", () => {
     expect(coordinator.state().activity[0].message).toContain("no agent reply");
   });
 
-  it("turns the hidden no-response sentinel into a dismissed draft with no speech", async () => {
-    const provider = { id: "local-qwen" as const, complete: async () => ({ text: "[[NO_RESPONSE]]", provider: "local-qwen" as const, model: "test" }) };
+  it("never leaves a question unanswered when the model passes twice", async () => {
+    let calls = 0;
+    const provider = { id: "local-qwen" as const, complete: async () => { calls += 1; return { text: "[[NO_RESPONSE]]", provider: "local-qwen" as const, model: "test" }; } };
     const coordinator = new MeetingCoordinator(provider, new ResponsePolicy("autonomous"), new DraftStore(), new SimulatedSpeechOutput());
 
     const result = await coordinator.respondToConversation("Should we say anything?");
-    expect(result.draft.disposition).toBe("dismissed");
-    expect(coordinator.state().speech).toHaveLength(0);
+    expect(calls).toBe(2);
+    expect(result.draft).toMatchObject({ disposition: "authorized", reply: { model: "atlas-actionable-fallback" } });
+    expect(result.draft.reply.text).toContain("What specific error or behavior");
+    expect(coordinator.state().speech).toHaveLength(1);
+  });
+
+  it("uses a short backchannel when the autonomous model passes on a casual statement", async () => {
+    const provider = { id: "local-qwen" as const, complete: async () => ({ text: "[[NO_RESPONSE]]", provider: "local-qwen" as const, model: "test" }) };
+    const coordinator = new MeetingCoordinator(provider, new ResponsePolicy("autonomous"), new DraftStore(), new SimulatedSpeechOutput());
+
+    await coordinator.ingest({ id: "casual", speaker: "remote", text: "Eva, I finally organized my workshop this weekend.", occurredAt: new Date().toISOString() });
+
+    expect(coordinator.state().speech).toHaveLength(1);
+    expect(coordinator.state().drafts.some((draft) => draft.reply.text === "Mm-hmm." && draft.disposition === "authorized")).toBe(true);
+    expect(coordinator.state().activity.some((activity) => activity.message.includes("Conversational acknowledgement"))).toBe(true);
+  });
+
+  it("answers rather than backchanneling a direct question when the model passes", async () => {
+    const provider = { id: "local-qwen" as const, complete: async () => ({ text: "[[NO_RESPONSE]]", provider: "local-qwen" as const, model: "test" }) };
+    const coordinator = new MeetingCoordinator(provider, new ResponsePolicy("autonomous"), new DraftStore(), new SimulatedSpeechOutput());
+
+    await coordinator.ingest({ id: "question", speaker: "remote", text: "Eva, what do you think about that?", occurredAt: new Date().toISOString() });
+
+    expect(coordinator.state().speech).toHaveLength(1);
+    expect(coordinator.state().drafts.some((draft) => draft.reply.model === "atlas-actionable-fallback")).toBe(true);
+    expect(coordinator.state().drafts.some((draft) => draft.reply.text === "Mm-hmm." || draft.reply.text === "I understand.")).toBe(false);
+  });
+
+  it("retries a substantial support request and uses the recovered answer", async () => {
+    const questions: string[] = [];
+    const provider = {
+      id: "local-qwen" as const,
+      complete: async (request: { question: string }) => {
+        questions.push(request.question);
+        return {
+          text: questions.length === 1 ? "[[NO_RESPONSE]]" : "Let's check the approved client runbook and verify the failing step.",
+          provider: "local-qwen" as const,
+          model: "test",
+        };
+      },
+    };
+    const coordinator = new MeetingCoordinator(provider, new ResponsePolicy("autonomous"), new DraftStore(), new SimulatedSpeechOutput());
+
+    await coordinator.ingest({ id: "support", speaker: "remote", text: "Eva, I need help because the account login is failing.", occurredAt: new Date().toISOString() });
+
+    expect(questions).toHaveLength(2);
+    expect(questions[1]).toContain("You must respond now");
+    expect(coordinator.state().drafts.some((draft) => draft.reply.text.includes("approved client runbook"))).toBe(true);
+    expect(coordinator.state().speech).toHaveLength(1);
   });
 });
 

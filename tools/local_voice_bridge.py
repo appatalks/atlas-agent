@@ -19,14 +19,14 @@ MAX_INPUT_CHARS = 12_000
 
 
 class VoiceService:
-    def __init__(self, reference: Path, eva_reference: Path | None, cache_dir: Path, warm_texts: set[str], seed_audio: Path | None, seed_reference_sha256: str, auth_token: str = "") -> None:
+    def __init__(self, reference: Path, eva_reference: Path | None, cache_dir: Path, warm_texts: set[str], seed_audio_by_text: dict[str, Path], seed_reference_sha256: str, auth_token: str = "") -> None:
         self.reference = reference
         self.references = {"appatalks": reference}
         if eva_reference:
             self.references["eva"] = eva_reference
         self.cache_dir = cache_dir
         self.warm_texts = warm_texts
-        self.seed_audio = seed_audio
+        self.seed_audio_by_text = seed_audio_by_text
         self.seed_reference_sha256 = seed_reference_sha256
         self.auth_token = auth_token
         self.engines: dict[str, Any] = {}
@@ -72,9 +72,10 @@ class VoiceService:
             cache_path = self.cache_path(text, exaggeration, cfg_weight, profile_id, reference) if text in self.warm_texts else None
             if cache_path and cache_path.is_file():
                 return cache_path.read_bytes()
-            if cache_path and self.seed_matches(reference, profile_id):
+            seed_audio = self.seed_audio_by_text.get(text)
+            if cache_path and seed_audio and self.seed_matches(reference, profile_id, seed_audio):
                 self.cache_dir.mkdir(parents=True, exist_ok=True)
-                cache_path.write_bytes(self.seed_audio.read_bytes())
+                cache_path.write_bytes(seed_audio.read_bytes())
                 return cache_path.read_bytes()
             engine = self.engines.get(profile_id)
             if engine is None:
@@ -111,8 +112,8 @@ class VoiceService:
         }, sort_keys=True).encode()
         return self.cache_dir / f"{hashlib.sha256(key).hexdigest()}.wav"
 
-    def seed_matches(self, reference: Path, profile_id: str) -> bool:
-        if not (self.seed_audio and self.seed_audio.is_file() and profile_id == "appatalks" and self.seed_reference_sha256):
+    def seed_matches(self, reference: Path, profile_id: str, seed_audio: Path) -> bool:
+        if not (seed_audio.is_file() and profile_id == "appatalks" and self.seed_reference_sha256):
             return False
         with reference.open("rb") as stream:
             reference_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
@@ -194,26 +195,33 @@ def main() -> None:
     parser.add_argument("--cache-dir", type=Path, default=Path.home() / ".cache" / "atlas" / "greetings")
     parser.add_argument("--seed-audio", type=Path)
     parser.add_argument("--seed-reference-sha256", default="")
-    parser.add_argument("--warm-text", default="")
+    parser.add_argument("--warm-text", action="append", default=[])
+    parser.add_argument("--seed-text-audio", action="append", nargs=2, metavar=("TEXT", "PATH"), default=[])
     parser.add_argument("--warm-exaggeration", type=float, default=0.65)
     parser.add_argument("--warm-cfg-weight", type=float, default=0.35)
     args = parser.parse_args()
     handler = type("VoiceHandler", (Handler,), {})
+    seed_audio_by_text = {
+        text: Path(path).expanduser().resolve()
+        for text, path in args.seed_text_audio
+    }
+    if args.seed_audio and args.warm_text:
+        seed_audio_by_text.setdefault(args.warm_text[0], args.seed_audio.expanduser().resolve())
     handler.service = VoiceService(
         args.reference.expanduser().resolve(),
         args.eva_reference.expanduser().resolve() if args.eva_reference else None,
         args.cache_dir.expanduser().resolve(),
-        set(),
-        args.seed_audio.expanduser().resolve() if args.seed_audio else None,
+        set(args.warm_text),
+        seed_audio_by_text,
         args.seed_reference_sha256,
         os.getenv("VOICE_BRIDGE_TTS_AUTH_TOKEN", "").strip(),
     )
-    if args.warm_text:
+    for warm_text in args.warm_text:
         try:
-            handler.service.warm(args.warm_text, args.warm_exaggeration, args.warm_cfg_weight)
-            print("AppaTalks Standard Greeting cache ready", flush=True)
+            handler.service.warm(warm_text, args.warm_exaggeration, args.warm_cfg_weight)
+            print(f"AppaTalks cached phrase ready: {warm_text}", flush=True)
         except Exception as error:
-            print(f"AppaTalks Standard Greeting cache unavailable: {error}", flush=True)
+            print(f"AppaTalks cached phrase unavailable ({warm_text}): {error}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), handler)
     print(f"AppaTalks TTS listening on http://{args.host}:{args.port}")
     try:
