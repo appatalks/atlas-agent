@@ -2,8 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { CopilotAcpProvider, LocalQwenProvider, OpenAiCompatibleProvider, ProviderRouter, SimulationProvider } from "../src/providers.js";
 import { MeetingCoordinator } from "../src/coordinator.js";
-import { LocalVoiceBridgeOutput, SimulatedSpeechOutput } from "../src/voice.js";
+import { LocalVoiceBridgeOutput, SimulatedSpeechOutput, type SpeechOptions } from "../src/voice.js";
 import { DraftStore, ResponsePolicy } from "../src/policy.js";
+
+class CapturingSpeechOutput extends SimulatedSpeechOutput {
+  lastOptions: SpeechOptions | undefined;
+
+  override async dispatch(draft: Parameters<SimulatedSpeechOutput["dispatch"]>[0], options?: SpeechOptions) {
+    this.lastOptions = options;
+    return super.dispatch(draft, options);
+  }
+}
 
 describe("response policy", () => {
   it("requires approval by default", () => {
@@ -79,6 +88,25 @@ describe("voice expression controls", () => {
 
     await output.dispatch(draft);
     expect(headers).toMatchObject({ authorization: "Bearer shared-secret" });
+  });
+
+  it("uses the AppaTalks TTS asset for Small-Talk-Agent", async () => {
+    const speech = new CapturingSpeechOutput();
+    const coordinator = new MeetingCoordinator(
+      new SimulationProvider(),
+      new ResponsePolicy("approval"),
+      new DraftStore(),
+      speech,
+    );
+
+    coordinator.updateSettings({ voiceProfile: "Small-Talk-Agent" });
+    await coordinator.speakTemplate("What would you like to talk about?");
+
+    expect(speech.lastOptions).toMatchObject({
+      profileId: "appatalks",
+      exaggeration: 0.7,
+      cfgWeight: 0.3,
+    });
   });
 });
 

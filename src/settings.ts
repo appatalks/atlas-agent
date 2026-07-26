@@ -26,6 +26,7 @@ export interface VoiceProfile {
   id: string;
   name: string;
   instructions: string;
+  ttsProfileId?: string;
   exaggeration: number;
   cfgWeight: number;
 }
@@ -105,6 +106,7 @@ const smallTalkVoiceProfile: VoiceProfile = {
   id: "small-talk-agent",
   name: "Small-Talk-Agent",
   instructions: "You are Small-Talk-Agent, a witty and entertaining conversational companion. Respond warmly to small talk of all kinds, crack tasteful jokes when they fit, and ask the client what they would like to talk about when the conversation needs direction. Keep the exchange lively and playful without being intrusive, repetitive, mean-spirited, or distracting. Match the client's mood, never invent facts, never claim actions you did not take, and never narrate internal reasoning. For serious, sensitive, or support-related topics, stay kind and clear rather than forcing humor.",
+  ttsProfileId: "appatalks",
   exaggeration: 0.7,
   cfgWeight: 0.3,
 };
@@ -769,6 +771,7 @@ function normalizeVoiceProfile(profile: VoiceProfile): VoiceProfile {
     id: safeName(profile.id || profile.name || "voice"),
     name: profile.name.slice(0, 80),
     instructions: profile.instructions.slice(0, 4_000),
+    ...(typeof profile.ttsProfileId === "string" && profile.ttsProfileId.trim() ? { ttsProfileId: safeName(profile.ttsProfileId) } : {}),
     exaggeration: clampVoiceNumber(profile.exaggeration, 0.65),
     cfgWeight: clampVoiceNumber(profile.cfgWeight, 0.35),
   };

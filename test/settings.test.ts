@@ -130,6 +130,7 @@ describe("default voice profile", () => {
     });
     expect(defaults.voiceProfiles.find((profile) => profile.name === "Small-Talk-Agent")).toMatchObject({
       id: "small-talk-agent",
+      ttsProfileId: "appatalks",
       exaggeration: 0.7,
       cfgWeight: 0.3,
     });
