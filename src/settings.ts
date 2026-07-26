@@ -101,6 +101,14 @@ const evaVoiceProfile: VoiceProfile = {
   cfgWeight: 0.4,
 };
 
+const smallTalkVoiceProfile: VoiceProfile = {
+  id: "small-talk-agent",
+  name: "Small-Talk-Agent",
+  instructions: "You are Small-Talk-Agent, a witty and entertaining conversational companion. Respond warmly to small talk of all kinds, crack tasteful jokes when they fit, and ask the client what they would like to talk about when the conversation needs direction. Keep the exchange lively and playful without being intrusive, repetitive, mean-spirited, or distracting. Match the client's mood, never invent facts, never claim actions you did not take, and never narrate internal reasoning. For serious, sensitive, or support-related topics, stay kind and clear rather than forcing humor.",
+  exaggeration: 0.7,
+  cfgWeight: 0.3,
+};
+
 const defaultVoiceProfiles: VoiceProfile[] = [
   {
     id: "appatalks",
@@ -110,6 +118,7 @@ const defaultVoiceProfiles: VoiceProfile[] = [
     cfgWeight: 0.35,
   },
   evaVoiceProfile,
+  smallTalkVoiceProfile,
 ];
 
 export function defaultSettings(): VoiceBridgeSettings {
@@ -119,7 +128,7 @@ export function defaultSettings(): VoiceBridgeSettings {
     false,
   );
   return {
-    settingsVersion: 14,
+    settingsVersion: 15,
     appearanceTheme: "atlas",
     glassTransparency: 88,
     responseMode: "autonomous",
@@ -222,11 +231,11 @@ export class SettingsStore {
       const preV5 = !stored.settingsVersion || stored.settingsVersion < 5;
       const storedAppearance = (stored as { appearanceTheme?: unknown }).appearanceTheme;
       const requiresAppaTalksMigration = isLegacyDefaultVoiceSelection(stored.voiceProfile) || stored.voiceProfiles?.some(isLegacyDefaultVoiceProfile);
-      const requiresMigration = stored.settingsVersion !== 14 || requiresAppaTalksMigration || storedAppearance === "atsla";
+      const requiresMigration = stored.settingsVersion !== 15 || requiresAppaTalksMigration || storedAppearance === "atsla";
       const migrated = requiresMigration
         ? {
           ...stored,
-          settingsVersion: 14,
+          settingsVersion: 15,
           ...(storedAppearance === "atelier" || storedAppearance === "atsla" ? { appearanceTheme: "atlas" as const } : {}),
           ...(preV5 ? { responseMode: "autonomous" as const, defaultInputMode: "agent" as const } : {}),
         }
@@ -235,7 +244,7 @@ export class SettingsStore {
         .map(normalizeVoiceProfile)
         .map(migrateAppaTalksVoiceProfile)
         .map(migrateAtlasVoiceProfile);
-      const voiceProfiles = ensureEvaVoiceProfile(migratedVoiceProfiles);
+      const voiceProfiles = ensureBuiltInVoiceProfiles(migratedVoiceProfiles);
       for (const profile of voiceProfiles) {
         if (preV5 && profile.id === "appatalks" && !profile.instructions.includes("natural contractions")) {
           profile.instructions += " Use natural contractions, brief thoughtful pauses, varied sentence rhythm, and warm human phrasing without narrating internal reasoning.";
@@ -793,9 +802,12 @@ function migrateAtlasAgentProfile(profile: AgentProfile): AgentProfile {
   return { ...profile, instructions: migrateAtlasBrandText(profile.instructions) };
 }
 
-function ensureEvaVoiceProfile(profiles: VoiceProfile[]): VoiceProfile[] {
-  if (profiles.some((profile) => profile.id === "eva" || profile.name === "Eva")) return profiles;
-  return [...profiles, { ...evaVoiceProfile }];
+function ensureBuiltInVoiceProfiles(profiles: VoiceProfile[]): VoiceProfile[] {
+  const withEva = profiles.some((profile) => profile.id === "eva" || profile.name === "Eva")
+    ? profiles
+    : [...profiles, { ...evaVoiceProfile }];
+  if (withEva.some((profile) => profile.id === smallTalkVoiceProfile.id || profile.name === smallTalkVoiceProfile.name)) return withEva;
+  return [...withEva, { ...smallTalkVoiceProfile }];
 }
 
 function isLegacyDefaultVoiceSelection(value: string | undefined): boolean {
