@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ATLAS is a local, operator-controlled AI support agent for live customer conversations, with isolated client context, guarded autonomy, and expressive voice profiles.">
+  <meta name="theme-color" content="#050611">
+  <meta property="og:title" content="ATLAS | Live Agentic Support">
+  <meta property="og:description" content="AI-assisted live support with operator control. Local-first, client-isolated, and built for real conversations.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://appatalks.github.io/atlas-agent/">
+  <meta property="og:image" content="https://raw.githubusercontent.com/appatalks/atlas-agent/main/docs/atlas-agent-splash.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>ATLAS | Live Agentic Support</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=Sora:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f7f8ff;
+      --muted: #9aa4bb;
+      --dim: #68728a;
+      --night: #050611;
+      --panel: #0d1222;
+      --panel-2: #11172b;
+      --line: rgba(154, 173, 214, .18);
+      --line-bright: rgba(99, 241, 229, .42);
+      --cyan: #63f1e5;
+      --cyan-strong: #12d9e6;
+      --green: #2df29a;
+      --violet: #a477ff;
+      --blue: #3d8cff;
+      --danger: #ff8d9c;
+      --max: 1180px;
+      --radius: 8px;
+      --header: 66px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 280px;
+      overflow-x: hidden;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(99, 241, 229, .025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99, 241, 229, .025) 1px, transparent 1px),
+        var(--night);
+      background-size: 56px 56px;
+      font-family: "Sora", sans-serif;
+      letter-spacing: 0;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background: linear-gradient(115deg, rgba(4, 16, 36, .42), transparent 38%, rgba(30, 8, 57, .18));
+    }
+    a { color: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    img { display: block; max-width: 100%; }
+    code, .mono { font-family: "IBM Plex Mono", monospace; }
+    .skip-link {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 100;
+      padding: 10px 14px;
+      color: #061018;
+      background: var(--cyan);
+      transform: translateY(-150%);
+    }
+    .skip-link:focus { transform: translateY(0); }
+    :focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+    .site-header {
+      position: fixed;
+      inset: 0 0 auto;
+      z-index: 30;
+      height: var(--header);
+      border-bottom: 1px solid var(--line);
+      background: rgba(5, 6, 17, .76);
+      backdrop-filter: blur(18px);
+    }
+    .nav-shell {
+      width: min(var(--max), calc(100% - 40px));
+      height: 100%;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      font-weight: 700;
+    }
+    .brand-mark {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 18px var(--cyan);
+    }
+    .brand-sub { color: var(--muted); font-size: 12px; font-weight: 400; }
+    .nav-links { display: flex; align-items: center; gap: 26px; }
+    .nav-links a {
+      color: var(--muted);
+      font-size: 13px;
+      text-decoration: none;
+      transition: color .2s ease;
+    }
+    .nav-links a:hover { color: var(--ink); }
+    .nav-links .nav-cta {
+      padding: 10px 15px;
+      border: 1px solid var(--line-bright);
+      border-radius: var(--radius);
+      color: var(--cyan);
+      background: rgba(99, 241, 229, .08);
+    }
+
+    .hero {
+      position: relative;
+      min-height: 88svh;
+      padding: calc(var(--header) + 46px) 0 44px;
+      display: grid;
+      align-items: end;
+      isolation: isolate;
+      overflow: hidden;
+      border-bottom: 1px solid var(--line);
+    }
+    .hero-media, .hero-shade { position: absolute; inset: 0; }
+    .hero-media {
+      z-index: -3;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 50% 50%;
+      filter: saturate(.88) contrast(1.08) brightness(.62);
+    }
+    .hero-shade {
+      z-index: -2;
+      background:
+        linear-gradient(90deg, rgba(5, 6, 17, .96) 0%, rgba(5, 6, 17, .82) 32%, rgba(5, 6, 17, .24) 68%, rgba(5, 6, 17, .58) 100%),
+        linear-gradient(0deg, var(--night) 0%, transparent 32%, rgba(5, 6, 17, .18) 100%);
+    }
+    .hero-content {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 640px) 1fr;
+      gap: 60px;
+      align-items: end;
+    }
+    .eyebrow {
+      margin: 0 0 18px;
+      color: var(--cyan);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .14em;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      margin-bottom: 20px;
+      font-size: clamp(54px, 8vw, 108px);
+      line-height: .92;
+      letter-spacing: 0;
+    }
+    h1 span { display: block; margin-top: 12px; color: var(--cyan); font-size: .28em; line-height: 1.15; font-weight: 500; }
+    .hero-copy {
+      max-width: 620px;
+      margin-bottom: 28px;
+      color: #d1d6e4;
+      font-size: clamp(17px, 2vw, 21px);
+      line-height: 1.65;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .button {
+      min-height: 46px;
+      padding: 0 19px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      color: var(--ink);
+      background: rgba(10, 14, 29, .72);
+      text-decoration: none;
+      font: 500 14px "Sora", sans-serif;
+      transition: transform .2s ease, border-color .2s ease, background .2s ease;
+    }
+    .button:hover { transform: translateY(-2px); border-color: var(--line-bright); }
+    .button.primary { color: #041313; border-color: var(--cyan); background: var(--cyan); }
+    .button.primary:hover { background: #91fff5; }
+    .hero-status {
+      justify-self: end;
+      width: min(360px, 100%);
+      padding: 20px;
+      border: 1px solid var(--line-bright);
+      border-radius: var(--radius);
+      background: rgba(6, 9, 22, .76);
+      backdrop-filter: blur(12px);
+    }
+    .status-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .live { display: inline-flex; align-items: center; gap: 8px; color: var(--green); font: 500 11px "IBM Plex Mono", monospace; }
+    .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 12px currentColor; }
+    .status-time { color: var(--muted); font: 12px "IBM Plex Mono", monospace; }
+    .waveform { height: 62px; margin: 16px 0; display: flex; align-items: center; gap: 4px; }
+    .waveform i {
+      display: block;
+      width: 3px;
+      height: calc(10px + var(--h) * 1px);
+      max-height: 54px;
+      border-radius: 3px;
+      background: linear-gradient(var(--cyan), var(--violet));
+      animation: pulse 1.8s ease-in-out infinite alternate;
+      animation-delay: calc(var(--d) * -70ms);
+    }
+    @keyframes pulse { to { transform: scaleY(.42); opacity: .56; } }
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .status-grid div { padding-top: 10px; border-top: 1px solid var(--line); }
+    .status-grid span { display: block; color: var(--dim); font: 10px "IBM Plex Mono", monospace; text-transform: uppercase; }
+    .status-grid strong { display: block; margin-top: 5px; font-size: 13px; }
+
+    .signal-strip {
+      min-height: 112px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(8, 10, 24, .88);
+    }
+    .signal-inner {
+      width: min(var(--max), calc(100% - 40px));
+      min-height: inherit;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .signal-item { padding: 27px 24px; border-left: 1px solid var(--line); }
+    .signal-item:last-child { border-right: 1px solid var(--line); }
+    .signal-item b { display: block; margin-bottom: 7px; color: var(--cyan); font: 500 11px "IBM Plex Mono", monospace; }
+    .signal-item span { color: #d7dbea; font-size: 13px; line-height: 1.45; }
+
+    .section { padding: 110px 0; border-bottom: 1px solid var(--line); }
+    .section-shell { width: min(var(--max), calc(100% - 40px)); margin: 0 auto; }
+    .section-heading { max-width: 760px; margin-bottom: 54px; }
+    h2 { margin-bottom: 18px; font-size: clamp(34px, 5vw, 64px); line-height: 1.05; letter-spacing: 0; }
+    .section-heading > p:not(.eyebrow) { color: var(--muted); font-size: 17px; line-height: 1.7; }
+
+    .capability-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .capability {
+      min-height: 250px;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(145deg, rgba(18, 25, 46, .88), rgba(9, 12, 27, .9));
+    }
+    .capability-index { color: var(--cyan); font: 11px "IBM Plex Mono", monospace; }
+    .capability h3 { margin: 44px 0 12px; font-size: 18px; }
+    .capability p { margin-bottom: 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+
+    .loop-layout { display: grid; grid-template-columns: 1fr 1.25fr; gap: 76px; align-items: center; }
+    .loop-copy p { color: var(--muted); line-height: 1.75; }
+    .loop-steps { position: relative; }
+    .loop-steps::before { content: ""; position: absolute; top: 32px; bottom: 32px; left: 20px; width: 1px; background: linear-gradient(var(--cyan), var(--violet)); }
+    .loop-step { position: relative; padding: 20px 20px 20px 68px; }
+    .loop-step::before {
+      content: attr(data-step);
+      position: absolute;
+      top: 24px;
+      left: 0;
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line-bright);
+      border-radius: 50%;
+      color: var(--cyan);
+      background: var(--night);
+      font: 11px "IBM Plex Mono", monospace;
+    }
+    .loop-step h3 { margin-bottom: 7px; font-size: 16px; }
+    .loop-step p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+    .isolation-map { display: grid; grid-template-columns: 1fr 80px 1.2fr 80px 1fr; align-items: stretch; }
+    .map-column { display: grid; gap: 12px; }
+    .map-label { margin-bottom: 3px; color: var(--dim); font: 10px "IBM Plex Mono", monospace; text-transform: uppercase; }
+    .map-node { min-height: 92px; padding: 18px; display: flex; flex-direction: column; justify-content: center; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+    .map-node strong { font-size: 14px; }
+    .map-node span { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .map-node.active { border-color: var(--line-bright); background: linear-gradient(145deg, rgba(21, 55, 64, .6), rgba(15, 20, 40, .9)); }
+    .map-node.policy { border-color: rgba(164, 119, 255, .42); }
+    .map-arrow { position: relative; min-height: 100%; }
+    .map-arrow::before { content: ""; position: absolute; top: 50%; left: 12px; right: 12px; height: 1px; background: var(--line-bright); }
+    .map-arrow::after { content: ""; position: absolute; top: calc(50% - 4px); right: 11px; width: 8px; height: 8px; border-top: 1px solid var(--cyan); border-right: 1px solid var(--cyan); transform: rotate(45deg); }
+    .isolation-note { max-width: 780px; margin: 34px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+
+    .voice-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .voice-card { position: relative; min-height: 290px; padding: 26px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+    .voice-card::after { content: ""; position: absolute; inset: auto 20px 22px; height: 1px; background: linear-gradient(90deg, var(--voice), transparent); }
+    .voice-card .voice-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--voice); box-shadow: 0 0 24px var(--voice); }
+    .voice-card h3 { margin: 48px 0 10px; font-size: 21px; }
+    .voice-card p { color: var(--muted); font-size: 14px; line-height: 1.7; }
+    .voice-meta { position: absolute; right: 26px; bottom: 30px; color: var(--dim); font: 10px "IBM Plex Mono", monospace; text-transform: uppercase; }
+
+    .security-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 70px; align-items: center; }
+    .security-list { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    .security-item { padding: 20px; display: grid; grid-template-columns: 36px 1fr; gap: 14px; background: var(--night); }
+    .security-item b { color: var(--green); font: 12px "IBM Plex Mono", monospace; }
+    .security-item strong { display: block; margin-bottom: 6px; font-size: 14px; }
+    .security-item span { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .proof-row { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 34px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .proof { padding: 22px 16px; border-right: 1px solid var(--line); }
+    .proof:last-child { border-right: 0; }
+    .proof strong { display: block; color: var(--cyan); font: 500 24px "IBM Plex Mono", monospace; }
+    .proof span { color: var(--dim); font-size: 11px; }
+
+    .install-layout { display: grid; grid-template-columns: .85fr 1.15fr; gap: 70px; align-items: center; }
+    .install-copy p { color: var(--muted); line-height: 1.75; }
+    .terminal {
+      overflow: hidden;
+      border: 1px solid var(--line-bright);
+      border-radius: var(--radius);
+      background: #02040b;
+      box-shadow: 0 30px 90px rgba(0, 0, 0, .42);
+    }
+    .terminal-head { height: 43px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); color: var(--dim); font: 10px "IBM Plex Mono", monospace; }
+    .terminal-dots { display: flex; gap: 6px; }
+    .terminal-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+    .command-wrap { position: relative; padding: 26px 64px 26px 22px; }
+    .command-wrap code { display: block; overflow-x: auto; color: var(--cyan); font-size: 13px; line-height: 1.7; white-space: nowrap; scrollbar-width: thin; }
+    .copy-button {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--panel);
+      cursor: pointer;
+    }
+    .copy-button:hover { color: var(--cyan); border-color: var(--line-bright); }
+    .launch-row { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
+    .launch-option { padding: 20px 22px; }
+    .launch-option + .launch-option { border-left: 1px solid var(--line); }
+    .launch-option b { display: block; margin-bottom: 6px; font-size: 13px; }
+    .launch-option span { color: var(--dim); font-size: 11px; }
+
+    .sister-band { padding: 58px 0; border-bottom: 1px solid var(--line); background: rgba(12, 15, 31, .7); }
+    .sister-inner { width: min(var(--max), calc(100% - 40px)); margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 36px; }
+    .sister-copy { max-width: 760px; }
+    .sister-copy h2 { margin-bottom: 9px; font-size: 24px; }
+    .sister-copy p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+
+    footer { padding: 34px 0; }
+    .footer-inner { width: min(var(--max), calc(100% - 40px)); margin: 0 auto; display: flex; justify-content: space-between; gap: 24px; color: var(--dim); font-size: 11px; }
+    .footer-links { display: flex; gap: 18px; }
+    .footer-links a { text-decoration: none; }
+    .footer-links a:hover { color: var(--cyan); }
+
+    .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 900px) {
+      .nav-links a:not(.nav-cta):not(.github-link) { display: none; }
+      .hero { min-height: 92svh; align-items: end; }
+      .hero-content { grid-template-columns: 1fr; gap: 34px; }
+      .hero-status { justify-self: start; }
+      .signal-inner, .capability-grid, .voice-grid { grid-template-columns: repeat(2, 1fr); }
+      .loop-layout, .security-layout, .install-layout { grid-template-columns: 1fr; gap: 46px; }
+      .isolation-map { grid-template-columns: 1fr; gap: 12px; }
+      .map-arrow { min-height: 48px; }
+      .map-arrow::before { top: 8px; bottom: 8px; left: 50%; right: auto; width: 1px; height: auto; }
+      .map-arrow::after { top: auto; bottom: 7px; left: calc(50% - 3px); right: auto; transform: rotate(135deg); }
+    }
+
+    @media (max-width: 620px) {
+      :root { --header: 58px; }
+      .nav-shell, .hero-content, .signal-inner, .section-shell, .sister-inner, .footer-inner { width: min(100% - 28px, var(--max)); }
+      .brand-sub, .github-link { display: none; }
+      .nav-links { gap: 10px; }
+      .hero { min-height: 91svh; padding-top: calc(var(--header) + 30px); }
+      .hero-media { object-position: 68% 50%; }
+      .hero-shade { background: linear-gradient(0deg, var(--night) 0%, rgba(5, 6, 17, .7) 55%, rgba(5, 6, 17, .36) 100%); }
+      h1 { font-size: clamp(52px, 19vw, 76px); }
+      h1 span { font-size: .25em; }
+      .hero-copy { font-size: 16px; }
+      .hero-status { padding: 16px; }
+      .signal-inner, .capability-grid, .voice-grid { grid-template-columns: 1fr; }
+      .signal-item, .signal-item:last-child { border-right: 1px solid var(--line); }
+      .section { padding: 78px 0; }
+      .section-heading { margin-bottom: 36px; }
+      .capability { min-height: 220px; }
+      .proof-row { grid-template-columns: 1fr; }
+      .proof, .proof:last-child { border-right: 0; border-bottom: 1px solid var(--line); }
+      .proof:last-child { border-bottom: 0; }
+      .launch-row { grid-template-columns: 1fr; }
+      .launch-option + .launch-option { border-left: 0; border-top: 1px solid var(--line); }
+      .sister-inner, .footer-inner { align-items: flex-start; flex-direction: column; }
+      .footer-links { flex-wrap: wrap; }
+    }
+
+    @media (max-width: 620px) and (max-height: 720px) {
+      .hero-status { display: none; }
+      .hero { min-height: 91svh; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+      .reveal { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <nav class="nav-shell" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="ATLAS home"><span class="brand-mark" aria-hidden="true"></span><span>ATLAS</span><span class="brand-sub">Live Agentic Support</span></a>
+      <div class="nav-links">
+        <a href="#live-loop">Live loop</a>
+        <a href="#isolation">Isolation</a>
+        <a href="#voices">Voices</a>
+        <a class="github-link" href="https://github.com/appatalks/atlas-agent">GitHub</a>
+        <a class="nav-cta" href="#install">Install</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top" aria-labelledby="hero-title">
+      <img class="hero-media" src="docs/atlas-agent-splash.png" alt="ATLAS live support interface with an operator, client conversation, AI assistant, and isolated knowledge systems">
+      <div class="hero-shade" aria-hidden="true"></div>
+      <div class="hero-content">
+        <div>
+          <p class="eyebrow">AppaTalks Live Agentic Support</p>
+          <h1 id="hero-title">ATLAS<span>AI-assisted live support with operator control</span></h1>
+          <p class="hero-copy">A local support agent that listens to live calls, recalls only the selected client's approved context, drafts practical answers, and speaks when you allow it.</p>
+          <div class="actions">
+            <a class="button primary" href="#install">Install ATLAS <span aria-hidden="true">↓</span></a>
+            <a class="button" href="https://github.com/appatalks/atlas-agent">View on GitHub <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+        <aside class="hero-status" aria-label="Illustrative live agent status">
+          <div class="status-head"><span class="live">CALL ACTIVE</span><span class="status-time">00:04:28</span></div>
+          <div class="waveform" aria-hidden="true">
+            <i style="--h:8;--d:1"></i><i style="--h:19;--d:2"></i><i style="--h:33;--d:3"></i><i style="--h:15;--d:4"></i><i style="--h:42;--d:5"></i><i style="--h:25;--d:6"></i><i style="--h:48;--d:7"></i><i style="--h:29;--d:8"></i><i style="--h:38;--d:9"></i><i style="--h:20;--d:10"></i><i style="--h:44;--d:11"></i><i style="--h:31;--d:12"></i><i style="--h:16;--d:13"></i><i style="--h:35;--d:14"></i><i style="--h:23;--d:15"></i><i style="--h:11;--d:16"></i><i style="--h:27;--d:17"></i><i style="--h:14;--d:18"></i>
+          </div>
+          <div class="status-grid">
+            <div><span>Mode</span><strong>Operator approval</strong></div>
+            <div><span>Context</span><strong>Selected client only</strong></div>
+            <div><span>Reasoning</span><strong>Local or Copilot ACP</strong></div>
+            <div><span>Voice</span><strong>AppaTalks</strong></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <div class="signal-strip" aria-label="ATLAS principles">
+      <div class="signal-inner">
+        <div class="signal-item"><b>01 / LISTEN</b><span>Whisper transcription from the live call</span></div>
+        <div class="signal-item"><b>02 / RETRIEVE</b><span>Scoped public and selected-client knowledge</span></div>
+        <div class="signal-item"><b>03 / ASSIST</b><span>Answers, clarifications, and escalation paths</span></div>
+        <div class="signal-item"><b>04 / SPEAK</b><span>Expressive local voice through an isolated mic</span></div>
+      </div>
+    </div>
+
+    <section class="section" id="capabilities" aria-labelledby="capabilities-title">
+      <div class="section-shell">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Built for live support</p>
+          <h2 id="capabilities-title">Useful in the moment. Accountable after.</h2>
+          <p>ATLAS is not an unattended chatbot. It is an operator console for repeated support work where timing, context boundaries, and human judgment all matter.</p>
+        </div>
+        <div class="capability-grid">
+          <article class="capability reveal"><span class="capability-index">01 — LIVE AUDIO</span><h3>Conference-aware capture</h3><p>PipeWire routes remote audio into local transcription and gives ATLAS a separate agent microphone, avoiding feedback into the call transcript.</p></article>
+          <article class="capability reveal"><span class="capability-index">02 — OPERATOR CONTROL</span><h3>Monitor, approve, or automate</h3><p>Choose the response mode for the moment. Mute instantly, speak exact text, or take the microphone back without changing the client context.</p></article>
+          <article class="capability reveal"><span class="capability-index">03 — KNOWLEDGE</span><h3>Database-first context</h3><p>Retrieve approved public knowledge and one explicitly selected client scope from local SQLite or Azure Data Explorer snapshots.</p></article>
+          <article class="capability reveal"><span class="capability-index">04 — GUARDRAILS</span><h3>Policy before recall</h3><p>Global and client guardrails precede reference material. Restricted files, unsafe proposals, and cross-client routing fail closed.</p></article>
+          <article class="capability reveal"><span class="capability-index">05 — LEARNING</span><h3>Reviewable improvement</h3><p>Resolved sessions can produce evidence-backed knowledge proposals. Operators approve, reject, version, or retire what ATLAS learns.</p></article>
+          <article class="capability reveal"><span class="capability-index">06 — REASONING</span><h3>Local-first, provider-flexible</h3><p>Use local Qwen or an authenticated, stateless GitHub Copilot ACP bridge while the application retains control of routing and disclosure.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="live-loop" aria-labelledby="loop-title">
+      <div class="section-shell loop-layout">
+        <div class="loop-copy reveal">
+          <p class="eyebrow">The live loop</p>
+          <h2 id="loop-title">The operator stays in the decision.</h2>
+          <p>ATLAS keeps latency low without hiding the control plane. Every response moves through a visible loop from audio to scoped context to a draft or authorized spoken reply.</p>
+          <a class="button" href="https://github.com/appatalks/atlas-agent/blob/main/README-2.md">Read the technical guide <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="loop-steps reveal">
+          <article class="loop-step" data-step="01"><h3>Hear the remote turn</h3><p>Local Whisper converts the conference monitor into bounded transcript turns.</p></article>
+          <article class="loop-step" data-step="02"><h3>Apply policy and context</h3><p>Public guardrails, client guardrails, and ranked recall are assembled by the application.</p></article>
+          <article class="loop-step" data-step="03"><h3>Draft the contribution</h3><p>The selected model answers, asks for clarification, or recommends escalation.</p></article>
+          <article class="loop-step" data-step="04"><h3>Authorize the voice</h3><p>Policy and mode determine whether the response waits, speaks, or stays silent.</p></article>
+          <article class="loop-step" data-step="05"><h3>Review the outcome</h3><p>Session evidence can become a versioned proposal, never an invisible memory write.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="isolation" aria-labelledby="isolation-title">
+      <div class="section-shell">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Client isolation</p>
+          <h2 id="isolation-title">One active client. No conversational routing.</h2>
+          <p>The operator chooses the knowledge database. Caller text and model output never choose or switch it.</p>
+        </div>
+        <div class="isolation-map reveal" aria-label="ATLAS knowledge isolation flow">
+          <div class="map-column">
+            <span class="map-label">Operator state</span>
+            <div class="map-node active"><strong>Selected client</strong><span>Stable ID + explicit database route</span></div>
+            <div class="map-node"><strong>Public-only mode</strong><span>No private client context loaded</span></div>
+          </div>
+          <div class="map-arrow" aria-hidden="true"></div>
+          <div class="map-column">
+            <span class="map-label">Scoped recall</span>
+            <div class="map-node policy"><strong>Global guardrails</strong><span>Apply to every session</span></div>
+            <div class="map-node policy"><strong>Client guardrails</strong><span>Apply only to the active client</span></div>
+            <div class="map-node active"><strong>SQLite / ADX snapshot</strong><span>Physically separate client materialization</span></div>
+          </div>
+          <div class="map-arrow" aria-hidden="true"></div>
+          <div class="map-column">
+            <span class="map-label">Conversation</span>
+            <div class="map-node active"><strong>Bounded prompt</strong><span>Approved excerpts, provenance, and policy</span></div>
+            <div class="map-node"><strong>Reviewed learning</strong><span>Proposal → operator decision → version</span></div>
+          </div>
+        </div>
+        <p class="isolation-note reveal">Private URLs, credentials, regulated details, and unrelated client material stay outside the prompt unless the active scope and its guardrails explicitly allow them.</p>
+      </div>
+    </section>
+
+    <section class="section" id="voices" aria-labelledby="voices-title">
+      <div class="section-shell">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Voice profiles</p>
+          <h2 id="voices-title">The right presence for the conversation.</h2>
+          <p>Voice profiles guide phrasing and expression while the TTS bridge resolves an authorized local reference asset.</p>
+        </div>
+        <div class="voice-grid">
+          <article class="voice-card reveal" style="--voice:#63f1e5"><span class="voice-dot" aria-hidden="true"></span><h3>AppaTalks</h3><p>Calm operational authority for reliability work, incident clarity, practical remediation, and accountable next steps.</p><span class="voice-meta">Support partner</span></article>
+          <article class="voice-card reveal" style="--voice:#a477ff"><span class="voice-dot" aria-hidden="true"></span><h3>Eva</h3><p>Warm, curious, and genuine. A thoughtful, knowledgeable friend who leads with the useful answer and speaks naturally.</p><span class="voice-meta">Personal assistant</span></article>
+          <article class="voice-card reveal" style="--voice:#2df29a"><span class="voice-dot" aria-hidden="true"></span><h3>Small-Talk-Agent</h3><p>Witty, playful company for conversational moments, with tasteful humor and the judgment not to force it into serious topics.</p><span class="voice-meta">Conversation</span></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="security" aria-labelledby="security-title">
+      <div class="section-shell security-layout">
+        <div class="reveal">
+          <p class="eyebrow">Local-first security</p>
+          <h2 id="security-title">Boundaries are part of the product.</h2>
+          <p style="color:var(--muted);line-height:1.75">ATLAS treats database routes, workspace paths, sessions, guardrails, and speech authorization as application-controlled security boundaries.</p>
+          <div class="proof-row" aria-label="Project verification status">
+            <div class="proof"><strong>104</strong><span>automated tests</span></div>
+            <div class="proof"><strong>0</strong><span>open CodeQL alerts</span></div>
+            <div class="proof"><strong>0</strong><span>npm vulnerabilities</span></div>
+          </div>
+        </div>
+        <div class="security-list reveal">
+          <div class="security-item"><b>01</b><div><strong>Fail-closed paths</strong><span>Workspace, SQLite, cache, session, and symlink boundaries are validated before access.</span></div></div>
+          <div class="security-item"><b>02</b><div><strong>Scoped databases</strong><span>Separate client caches and explicit ADX routes prevent cross-client fallback.</span></div></div>
+          <div class="security-item"><b>03</b><div><strong>Guarded autonomy</strong><span>Questions receive an answer or clarification; risky decisions escalate to a person.</span></div></div>
+          <div class="security-item"><b>04</b><div><strong>Reviewable knowledge</strong><span>Proposals carry evidence and status; models cannot rewrite guardrail policy.</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="install" aria-labelledby="install-title">
+      <div class="section-shell install-layout">
+        <div class="install-copy reveal">
+          <p class="eyebrow">Install</p>
+          <h2 id="install-title">Bring ATLAS onto the call.</h2>
+          <p>The bootstrap creates a durable local checkout, installs the <code>atlas</code> launcher and desktop entry, and checks the audio, voice, transcription, and Node.js prerequisites.</p>
+          <p class="mono" style="color:var(--dim);font-size:11px">Linux · Node.js 24+ · PipeWire · Python 3.11+</p>
+        </div>
+        <div class="terminal reveal" aria-label="ATLAS installation command">
+          <div class="terminal-head"><span>ATLAS / QUICK INSTALL</span><span>HTTPS</span></div>
+          <div class="command-wrap">
+            <code id="install-command">curl -fsSL https://raw.githubusercontent.com/appatalks/atlas-agent/main/get-atlas.sh | bash</code>
+            <button class="copy-button" type="button" data-copy="install-command" aria-label="Copy install command" title="Copy install command">⧉</button>
+          </div>
+          <div class="launch-row">
+            <div class="launch-option"><b>Terminal</b><span>Run <code>atlas</code></span></div>
+            <div class="launch-option"><b>Application launcher</b><span>Open ATLAS from your desktop</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sister-band" aria-labelledby="sister-title">
+      <div class="sister-inner reveal">
+        <div class="sister-copy"><h2 id="sister-title">Built with Eva-Agent foundations</h2><p>ATLAS’s portable memory, scoped recall, and reviewed knowledge patterns grow from technology developed in Eva, its voice-first sister project.</p></div>
+        <a class="button" href="https://appatalks.github.io/eva-agent/">Meet Eva <span aria-hidden="true">↗</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <span>ATLAS · AppaTalks Live Agentic Support · ISC License</span>
+      <div class="footer-links"><a href="https://github.com/appatalks/atlas-agent">GitHub</a><a href="https://github.com/appatalks/atlas-agent/issues">Issues</a><a href="https://github.com/appatalks/eva-agent">Eva-Agent</a></div>
+    </div>
+  </footer>
+
+  <script>
+    const copyButton = document.querySelector('[data-copy]');
+    copyButton?.addEventListener('click', async () => {
+      const target = document.getElementById(copyButton.dataset.copy);
+      if (!target) return;
+      try {
+        await navigator.clipboard.writeText(target.textContent.trim());
+        copyButton.textContent = '✓';
+        copyButton.setAttribute('aria-label', 'Install command copied');
+        setTimeout(() => {
+          copyButton.textContent = '⧉';
+          copyButton.setAttribute('aria-label', 'Copy install command');
+        }, 1800);
+      } catch {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    });
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion || !('IntersectionObserver' in window)) {
+      document.querySelectorAll('.reveal').forEach((element) => element.classList.add('visible'));
+    } else {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: .12 });
+      document.querySelectorAll('.reveal').forEach((element) => observer.observe(element));
+    }
+  </script>
+</body>
+</html>

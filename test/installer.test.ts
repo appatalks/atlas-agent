@@ -5,6 +5,19 @@ import { describe, expect, it } from "vitest";
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 describe("installation entry points", () => {
+  it("publishes an accessible no-build GitHub Pages experience", () => {
+    const page = readFileSync(`${root}/index.html`, "utf8");
+    const packageMetadata = JSON.parse(readFileSync(`${root}/package.json`, "utf8")) as { homepage?: string };
+
+    expect(page).toContain("ATLAS | Live Agentic Support");
+    expect(page).toContain('src="docs/atlas-agent-splash.png"');
+    expect(page).toContain('href="#main"');
+    expect(page).toContain("prefers-reduced-motion: reduce");
+    expect(page).toContain("https://raw.githubusercontent.com/appatalks/atlas-agent/main/get-atlas.sh");
+    expect(page).toContain("https://appatalks.github.io/eva-agent/");
+    expect(packageMetadata.homepage).toBe("https://appatalks.github.io/atlas-agent/");
+  });
+
   it("provides a curl bootstrap and a durable atlas launcher", () => {
     const bootstrap = readFileSync(`${root}/get-atlas.sh`, "utf8");
     const installer = readFileSync(`${root}/tools/install.sh`, "utf8");

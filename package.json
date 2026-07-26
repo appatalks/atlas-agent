@@ -36,7 +36,7 @@
   "bugs": {
     "url": "https://github.com/appatalks/atlas-agent/issues"
   },
-  "homepage": "https://github.com/appatalks/atlas-agent#readme",
+  "homepage": "https://appatalks.github.io/atlas-agent/",
   "dependencies": {
     "@azure/core-auth": "^1.11.0",
     "@azure/identity": "^4.13.1",
