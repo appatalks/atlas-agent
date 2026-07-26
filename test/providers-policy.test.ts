@@ -111,6 +111,7 @@ describe("voice expression controls", () => {
 
   it("preserves Eva's character instructions and distinct voice end to end", async () => {
     let modelQuestion = "";
+    let voicePayload: Record<string, unknown> = {};
     const provider = {
       id: "local-qwen" as const,
       complete: async (request: { question: string }) => {
@@ -118,7 +119,10 @@ describe("voice expression controls", () => {
         return { text: "I am here. What is on your mind?", provider: "local-qwen" as const, model: "test" };
       },
     };
-    const speech = new CapturingSpeechOutput();
+    const speech = new LocalVoiceBridgeOutput(new URL("http://127.0.0.1:8090/"), async (_input, init) => {
+      voicePayload = JSON.parse(String(init?.body));
+      return new Response(new Uint8Array([82, 73, 70, 70]), { status: 200 });
+    });
     const coordinator = new MeetingCoordinator(provider, new ResponsePolicy("approval"), new DraftStore(), speech);
 
     coordinator.updateSettings({ voiceProfile: "Eva" });
@@ -128,7 +132,7 @@ describe("voice expression controls", () => {
     expect(modelQuestion).toContain("Voice profile: Eva");
     expect(modelQuestion).toContain("warm, curious, and genuine personal AI assistant");
     expect(modelQuestion).toContain("thoughtful, knowledgeable friend");
-    expect(speech.lastOptions).toMatchObject({ profileId: "eva", exaggeration: 0.55, cfgWeight: 0.4 });
+    expect(voicePayload).toMatchObject({ voice_profile: "eva", exaggeration: 0.55, cfg_weight: 0.4 });
   });
 });
 

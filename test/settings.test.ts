@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -65,6 +65,98 @@ describe("client workspace", () => {
     const workspace = new ClientWorkspace(join(root, "clients"));
 
     expect(() => workspace.select({ path: join(root, "escaped", "atlas-client") })).toThrow("must not escape through symbolic links");
+  });
+
+  it("does not follow a client profile symlink outside the workspace", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-profile-symlink-"));
+    folders.push(root);
+    const client = join(root, "clients", "northwind");
+    const outside = join(root, "outside.json");
+    mkdirSync(client, { recursive: true });
+    writeFileSync(outside, JSON.stringify({ protected: true }), "utf8");
+    symlinkSync(outside, join(client, "client-profile.json"));
+    const workspace = new ClientWorkspace(join(root, "clients"));
+
+    expect(() => workspace.select({ path: client })).toThrow("Workspace files must not be symbolic links");
+    expect(JSON.parse(readFileSync(outside, "utf8"))).toEqual({ protected: true });
+  });
+
+  it("does not write meeting logs through a symlinked workspace directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-meetings-symlink-"));
+    folders.push(root);
+    const workspace = new ClientWorkspace(join(root, "clients"));
+    const client = workspace.select({ name: "Northwind" });
+    const outside = join(root, "outside-meetings");
+    mkdirSync(outside);
+    rmSync(join(client, "meetings"), { recursive: true });
+    symlinkSync(outside, join(client, "meetings"));
+
+    expect(() => workspace.appendTranscript(client, "- Remote: private update")).toThrow("Workspace directories must not be symbolic links");
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("does not create a knowledge database through a symlinked data directory", async () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-database-symlink-"));
+    folders.push(root);
+    const workspace = new ClientWorkspace(join(root, "clients"));
+    const client = workspace.select({ name: "Northwind" });
+    const outside = join(root, "outside-database");
+    mkdirSync(outside);
+    symlinkSync(outside, join(client, ".atlas"));
+
+    await expect(workspace.loadClientContext(client)).rejects.toThrow("Workspace directories must not be symbolic links");
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("does not open a knowledge database through a symlinked database file", async () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-database-file-symlink-"));
+    folders.push(root);
+    const workspace = new ClientWorkspace(join(root, "clients"));
+    const client = workspace.select({ name: "Northwind" });
+    const outside = join(root, "outside.sqlite");
+    writeFileSync(outside, "protected", "utf8");
+    mkdirSync(join(client, ".atlas"));
+    symlinkSync(outside, join(client, ".atlas", "client-knowledge.sqlite"));
+
+    await expect(workspace.loadClientContext(client)).rejects.toThrow("SQLite database files must not be symbolic links");
+    expect(readFileSync(outside, "utf8")).toBe("protected");
+  });
+
+  it("rejects a symlinked client knowledge cache root", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-cache-symlink-"));
+    folders.push(root);
+    const outside = join(root, "outside-cache");
+    mkdirSync(outside);
+    symlinkSync(outside, join(root, ".atlas-cache"));
+
+    expect(() => new ClientWorkspace(root)).toThrow("Knowledge directories must not be symbolic links");
+  });
+
+  it("fails closed instead of reading guardrails through a symlink", async () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-guardrail-symlink-"));
+    folders.push(root);
+    const workspace = new ClientWorkspace(join(root, "clients"));
+    const client = workspace.select({ name: "Northwind" });
+    const outside = join(root, "outside-guardrails.md");
+    writeFileSync(outside, "# Outside policy\n\nThis must never be imported.\n", "utf8");
+    const guardrails = join(client, "context-drop", "CONTEXT-GUARDRAILS.md");
+    rmSync(guardrails);
+    symlinkSync(outside, guardrails);
+
+    await expect(workspace.loadClientContext(client)).rejects.toThrow("Workspace files must not be symbolic links");
+  });
+
+  it("fails closed on a malformed client profile instead of changing its identity", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-bridge-malformed-profile-"));
+    folders.push(root);
+    const client = join(root, "clients", "northwind");
+    mkdirSync(client, { recursive: true });
+    const profilePath = join(client, "client-profile.json");
+    writeFileSync(profilePath, "{ malformed", "utf8");
+    const workspace = new ClientWorkspace(join(root, "clients"));
+
+    expect(() => workspace.select({ path: client })).toThrow(SyntaxError);
+    expect(readFileSync(profilePath, "utf8")).toBe("{ malformed");
   });
 
   it("persists an explicit ADX route against the stable client identity", () => {

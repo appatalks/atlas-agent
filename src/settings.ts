@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
@@ -297,6 +297,8 @@ export class ClientWorkspace {
     private readonly knowledgeCacheRoot = defaultKnowledgeCacheRoot(defaultRoot),
   ) {
     mkdirSync(this.knowledgeCacheRoot, { recursive: true });
+    if (lstatSync(this.knowledgeCacheRoot).isSymbolicLink()) throw new Error("Knowledge cache directories must not be symbolic links.");
+    this.knowledgeCacheRoot = realpathSync(this.knowledgeCacheRoot);
   }
 
   async loadClient(client: ClientConfiguration, config: KnowledgeBackendConfig = localKnowledgeBackendConfig()): Promise<KnowledgeLoadResult> {
@@ -382,23 +384,23 @@ export class ClientWorkspace {
       ? this.safePath(request.path)
       : join(resolve(this.defaultRoot), safeName(request.name ?? "New Client"));
     mkdirSync(folder, { recursive: true });
-    mkdirSync(join(folder, "knowledge"), { recursive: true });
-    mkdirSync(join(folder, "skills"), { recursive: true });
-    mkdirSync(join(folder, "context-drop"), { recursive: true });
-    mkdirSync(join(folder, "learnings"), { recursive: true });
-    mkdirSync(join(folder, "meetings"), { recursive: true });
+    ensureWorkspaceDirectory(folder, "knowledge");
+    ensureWorkspaceDirectory(folder, "skills");
+    ensureWorkspaceDirectory(folder, "context-drop");
+    ensureWorkspaceDirectory(folder, "learnings");
+    ensureWorkspaceDirectory(folder, "meetings");
     const profilePath = join(folder, "client-profile.json");
     if (!existsSync(profilePath)) {
-      writeFileSync(profilePath, `${JSON.stringify({ id: `client-${randomUUID()}`, name: request.name?.trim() || basename(folder), createdAt: new Date().toISOString(), notes: "", knowledgeDatabase: "" }, null, 2)}\n`, "utf8");
-      writeFileSync(join(folder, "knowledge", "README.md"), "# Client Knowledge\n\nAdd product notes, runbooks, and account context here.\n", "utf8");
-      writeFileSync(join(folder, "skills", "README.md"), "# Agent Skills\n\nAdd client-specific procedures and escalation rules here.\n", "utf8");
-      writeFileSync(join(folder, "learnings", "README.md"), "# Session Learnings\n\nObserved client facts from sessions are retained here. Review before promoting them to authoritative knowledge.\n", "utf8");
+      writeWorkspaceFile(folder, profilePath, `${JSON.stringify({ id: `client-${randomUUID()}`, name: request.name?.trim() || basename(folder), createdAt: new Date().toISOString(), notes: "", knowledgeDatabase: "" }, null, 2)}\n`);
+      writeWorkspaceFile(folder, join(folder, "knowledge", "README.md"), "# Client Knowledge\n\nAdd product notes, runbooks, and account context here.\n");
+      writeWorkspaceFile(folder, join(folder, "skills", "README.md"), "# Agent Skills\n\nAdd client-specific procedures and escalation rules here.\n");
+      writeWorkspaceFile(folder, join(folder, "learnings", "README.md"), "# Session Learnings\n\nObserved client facts from sessions are retained here. Review before promoting them to authoritative knowledge.\n");
     }
     this.ensureClientProfile(folder, request.name);
     const contextReadme = join(folder, "context-drop", "README.md");
-    if (!existsSync(contextReadme)) writeFileSync(contextReadme, "# Bulk Context Drop\n\nDrop client reference files here. ATLAS reads `.md`, `.txt`, `.json`, `.csv`, `.yaml`, and `.yml` files after you explicitly load this client context. Maintain `CONTEXT-GUARDRAILS.md` in this folder to classify what may be discussed, what is sensitive, and what the agent must avoid.\n", "utf8");
+    if (!existsSync(contextReadme)) writeWorkspaceFile(folder, contextReadme, "# Bulk Context Drop\n\nDrop client reference files here. ATLAS reads `.md`, `.txt`, `.json`, `.csv`, `.yaml`, and `.yml` files after you explicitly load this client context. Maintain `CONTEXT-GUARDRAILS.md` in this folder to classify what may be discussed, what is sensitive, and what the agent must avoid.\n");
     const clientGuardrails = join(folder, "context-drop", CLIENT_GUARDRAILS_FILE);
-    if (!existsSync(clientGuardrails)) writeFileSync(clientGuardrails, defaultClientGuardrails(), "utf8");
+    if (!existsSync(clientGuardrails)) writeWorkspaceFile(folder, clientGuardrails, defaultClientGuardrails());
     return folder;
   }
 
@@ -442,10 +444,10 @@ export class ClientWorkspace {
     mkdirSync(resolved, { recursive: true });
     const readme = join(resolved, "README.md");
     if (!existsSync(readme)) {
-      writeFileSync(readme, "# Shared Voice Bridge Knowledge\n\nAdd documentation and reusable knowledge that is safe to share across every client here. Never place client-specific information in this folder.\n", "utf8");
+      writeWorkspaceFile(resolved, readme, "# Shared Voice Bridge Knowledge\n\nAdd documentation and reusable knowledge that is safe to share across every client here. Never place client-specific information in this folder.\n");
     }
     const guardrails = join(resolved, GLOBAL_GUARDRAILS_FILE);
-    if (!existsSync(guardrails)) writeFileSync(guardrails, defaultGlobalGuardrails(), "utf8");
+    if (!existsSync(guardrails)) writeWorkspaceFile(resolved, guardrails, defaultGlobalGuardrails());
     return resolved;
   }
 
@@ -521,33 +523,33 @@ export class ClientWorkspace {
     const profilePath = join(selected, "client-profile.json");
     const profile = this.clientProfile(selected);
     profile.knowledgeDatabase = database.trim() ? validateAdxDatabaseName(database) : "";
-    writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`, "utf8");
+    writeWorkspaceFile(selected, profilePath, `${JSON.stringify(profile, null, 2)}\n`);
     return { clientId: profile.id, name: profile.name, knowledgeDatabase: profile.knowledgeDatabase };
   }
 
   appendLearning(folder: string, sessionId: string, line: string): string {
     if (!folder) return "";
-    this.select({ path: folder });
+    const selected = this.select({ path: folder });
     const safeSessionId = sessionId.replace(/[^a-zA-Z0-9-]+/g, "-") || "unsessioned";
-    const path = join(folder, "learnings", `${safeSessionId}.observations.md`);
-    if (!existsSync(path)) appendFileSync(path, "# Session Observations\n\nThese are observed statements from the conversation and may require verification.\n\n", "utf8");
-    appendFileSync(path, `${line}\n`, "utf8");
+    const path = join(selected, "learnings", `${safeSessionId}.observations.md`);
+    if (!existsSync(path)) appendWorkspaceFile(selected, path, "# Session Observations\n\nThese are observed statements from the conversation and may require verification.\n\n");
+    appendWorkspaceFile(selected, path, `${line}\n`);
     return path;
   }
 
   appendTranscript(folder: string, line: string): void {
     if (!folder) return;
-    this.select({ path: folder });
-    appendFileSync(join(folder, "meetings", `${dateKey()}.transcript.md`), `${line}\n`, "utf8");
-    this.updateProfile(folder, { lastConversationAt: new Date().toISOString(), transcriptEvents: 1 });
+    const selected = this.select({ path: folder });
+    appendWorkspaceFile(selected, join(selected, "meetings", `${dateKey()}.transcript.md`), `${line}\n`);
+    this.updateProfile(selected, { lastConversationAt: new Date().toISOString(), transcriptEvents: 1 });
   }
 
   appendSummary(folder: string, summary: string): string {
     if (!folder) return "";
-    this.select({ path: folder });
-    const summaryPath = join(folder, "meetings", `${dateKey()}.summary.md`);
-    appendFileSync(summaryPath, `\n## ${new Date().toLocaleString()}\n${summary}\n`, "utf8");
-    this.updateProfile(folder, { lastSummaryAt: new Date().toISOString() });
+    const selected = this.select({ path: folder });
+    const summaryPath = join(selected, "meetings", `${dateKey()}.summary.md`);
+    appendWorkspaceFile(selected, summaryPath, `\n## ${new Date().toLocaleString()}\n${summary}\n`);
+    this.updateProfile(selected, { lastSummaryAt: new Date().toISOString() });
     return summaryPath;
   }
 
@@ -562,18 +564,16 @@ export class ClientWorkspace {
 
   private updateProfile(folder: string, changes: Record<string, string | number>): void {
     const profilePath = join(folder, "client-profile.json");
-    try {
-      const profile = JSON.parse(readFileSync(profilePath, "utf8")) as Record<string, unknown>;
-      profile.lastConversationAt = changes.lastConversationAt ?? profile.lastConversationAt;
-      profile.lastSummaryAt = changes.lastSummaryAt ?? profile.lastSummaryAt;
-      if (typeof changes.transcriptEvents === "number") profile.transcriptEvents = Number(profile.transcriptEvents ?? 0) + changes.transcriptEvents;
-      writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`, "utf8");
-    } catch {}
+    const profile = JSON.parse(readWorkspaceFile(folder, profilePath)) as Record<string, unknown>;
+    profile.lastConversationAt = changes.lastConversationAt ?? profile.lastConversationAt;
+    profile.lastSummaryAt = changes.lastSummaryAt ?? profile.lastSummaryAt;
+    if (typeof changes.transcriptEvents === "number") profile.transcriptEvents = Number(profile.transcriptEvents ?? 0) + changes.transcriptEvents;
+    writeWorkspaceFile(folder, profilePath, `${JSON.stringify(profile, null, 2)}\n`);
   }
 
   private clientContextFiles(folder: string): string[] {
     const roots = [join(folder, "client-profile.json"), join(folder, "context-drop"), join(folder, "knowledge"), join(folder, "skills"), join(folder, "learnings")];
-    return roots.flatMap((root) => existsSync(root) && statSync(root).isDirectory() ? walk(root) : existsSync(root) ? [root] : []).filter(isContextFile);
+    return roots.flatMap((root) => existsSync(root) && !lstatSync(root).isSymbolicLink() && lstatSync(root).isDirectory() ? walk(root) : existsSync(root) && !lstatSync(root).isSymbolicLink() ? [root] : []).filter(isContextFile);
   }
 
   private async synchronizeKnowledge(config: KnowledgeBackendConfig, scope: KnowledgeScope, scopeId: string, databasePath: string, root: string, files: string[], policyFiles: string[], explicitDatabase?: string, aliases?: string[], applyLocalSources = true): Promise<KnowledgeLoadResult> {
@@ -684,7 +684,8 @@ export class ClientWorkspace {
     const selected = this.safePath(folder, true);
     const profilePath = join(selected, "client-profile.json");
     let profile: Record<string, unknown> = {};
-    try { profile = JSON.parse(readFileSync(profilePath, "utf8")) as Record<string, unknown>; } catch {}
+    try { profile = JSON.parse(readWorkspaceFile(selected, profilePath)) as Record<string, unknown>; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     let changed = false;
     if (typeof profile.id !== "string" || !/^client-[a-f0-9-]{36}$/i.test(profile.id)) {
       profile.id = `client-${randomUUID()}`;
@@ -698,7 +699,7 @@ export class ClientWorkspace {
       profile.knowledgeDatabase = "";
       changed = true;
     }
-    if (changed) writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`, "utf8");
+    if (changed) writeWorkspaceFile(selected, profilePath, `${JSON.stringify(profile, null, 2)}\n`);
     return profile as ClientProfileRecord;
   }
 
@@ -723,8 +724,9 @@ export class ClientWorkspace {
   private writeSupplementaryProfile(folder: string, client: ClientConfiguration): void {
     const path = join(folder, "client-profile.json");
     let profile: Record<string, unknown> = {};
-    try { profile = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>; } catch {}
-    writeFileSync(path, `${JSON.stringify({ ...profile, id: client.id, name: client.name, knowledgeDatabase: client.knowledgeDatabase }, null, 2)}\n`, "utf8");
+    try { profile = JSON.parse(readWorkspaceFile(folder, path)) as Record<string, unknown>; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    writeWorkspaceFile(folder, path, `${JSON.stringify({ ...profile, id: client.id, name: client.name, knowledgeDatabase: client.knowledgeDatabase }, null, 2)}\n`);
   }
 
   private publicDatabasePath(folder: string): string {
@@ -915,11 +917,24 @@ function defaultKnowledgeCacheRoot(defaultRoot: string): string {
 }
 
 function knowledgeDataFolder(folder: string): string {
-  return migrateLegacyDirectory(join(folder, LEGACY_KNOWLEDGE_DATA_FOLDER), join(folder, KNOWLEDGE_DATA_FOLDER));
+  const root = realpathSync(folder);
+  const legacy = join(root, LEGACY_KNOWLEDGE_DATA_FOLDER);
+  const canonical = join(root, KNOWLEDGE_DATA_FOLDER);
+  if (existsSync(canonical)) return ensureWorkspaceDirectory(root, KNOWLEDGE_DATA_FOLDER);
+  if (existsSync(legacy)) {
+    ensureWorkspaceDirectory(root, LEGACY_KNOWLEDGE_DATA_FOLDER);
+    renameSync(legacy, canonical);
+  }
+  return ensureWorkspaceDirectory(root, KNOWLEDGE_DATA_FOLDER);
 }
 
 function migrateLegacyDirectory(legacy: string, canonical: string): string {
-  if (existsSync(canonical) || !existsSync(legacy)) return canonical;
+  if (existsSync(canonical)) {
+    if (lstatSync(canonical).isSymbolicLink()) throw new Error("Knowledge directories must not be symbolic links.");
+    return canonical;
+  }
+  if (!existsSync(legacy)) return canonical;
+  if (lstatSync(legacy).isSymbolicLink()) throw new Error("Legacy knowledge directories must not be symbolic links.");
   try {
     renameSync(legacy, canonical);
     return canonical;
@@ -1005,11 +1020,62 @@ function walk(folder: string): string[] {
     if (entry.startsWith(".")) continue;
     const file = join(folder, entry);
     try {
-      if (statSync(file).isDirectory()) files.push(...walk(file));
+      const stats = lstatSync(file);
+      if (stats.isSymbolicLink()) continue;
+      if (stats.isDirectory()) files.push(...walk(file));
       else files.push(file);
     } catch {}
   }
   return files;
+}
+
+function readWorkspaceFile(root: string, path: string): string {
+  const descriptor = openWorkspaceFile(root, path, constants.O_RDONLY);
+  try { return readFileSync(descriptor, "utf8"); } finally { closeSync(descriptor); }
+}
+
+function writeWorkspaceFile(root: string, path: string, content: string): void {
+  const descriptor = openWorkspaceFile(root, path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC);
+  try { writeFileSync(descriptor, content, "utf8"); } finally { closeSync(descriptor); }
+}
+
+function appendWorkspaceFile(root: string, path: string, content: string): void {
+  const descriptor = openWorkspaceFile(root, path, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND);
+  try { writeFileSync(descriptor, content, "utf8"); } finally { closeSync(descriptor); }
+}
+
+function openWorkspaceFile(root: string, path: string, flags: number): number {
+  const safePath = containedWorkspaceFile(root, path);
+  try {
+    return openSync(safePath, flags | constants.O_NOFOLLOW, 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") throw new Error("Workspace files must not be symbolic links.");
+    throw error;
+  }
+}
+
+function containedWorkspaceFile(root: string, path: string): string {
+  const canonicalRoot = realpathSync(root);
+  const canonicalParent = realpathSync(dirname(path));
+  if (!isPathWithin(canonicalRoot, canonicalParent, true)) throw new Error("Workspace file paths must remain inside their workspace.");
+  return join(canonicalParent, basename(path));
+}
+
+function ensureWorkspaceDirectory(root: string, name: string): string {
+  const canonicalRoot = realpathSync(root);
+  const safeDirectoryName = basename(name);
+  if (safeDirectoryName !== name || safeDirectoryName === "." || safeDirectoryName === "..") throw new Error("Workspace directory name is invalid.");
+  const path = join(canonicalRoot, safeDirectoryName);
+  if (existsSync(path)) {
+    const stats = lstatSync(path);
+    if (stats.isSymbolicLink()) throw new Error("Workspace directories must not be symbolic links.");
+    if (!stats.isDirectory()) throw new Error("Workspace directory path is not a directory.");
+  } else {
+    mkdirSync(path);
+  }
+  const canonicalPath = realpathSync(path);
+  if (!isPathWithin(canonicalRoot, canonicalPath, false)) throw new Error("Workspace directories must remain inside their workspace.");
+  return canonicalPath;
 }
 
 function isContextFile(file: string): boolean {
@@ -1019,29 +1085,24 @@ function isContextFile(file: string): boolean {
 function readKnowledgeDocuments(files: string[], root: string, scope: KnowledgeScope): KnowledgeDocumentInput[] {
   const documents: KnowledgeDocumentInput[] = [];
   for (const file of files) {
-    try {
-      const content = readFileSync(file, "utf8").trim();
-      if (!content) continue;
-      const sourcePath = relative(root, file);
-      documents.push({
-        sourcePath,
-        title: basename(file),
-        content,
-        classification: isRestrictedSource(sourcePath) ? "restricted" : scope,
-      });
-    } catch {}
+    const content = readWorkspaceFile(root, file).trim();
+    if (!content) continue;
+    const sourcePath = relative(root, file);
+    documents.push({
+      sourcePath,
+      title: basename(file),
+      content,
+      classification: isRestrictedSource(sourcePath) ? "restricted" : scope,
+    });
   }
   return documents;
 }
 
 function readKnowledgePolicies(files: string[], root: string): KnowledgePolicyInput[] {
-  return files.flatMap((file) => {
-    try {
-      const content = readFileSync(file, "utf8").trim();
-      return content ? [{ sourcePath: relative(root, file), content }] : [];
-    } catch {
-      return [];
-    }
+  return files.map((file) => {
+    const content = readWorkspaceFile(root, file).trim();
+    if (!content) throw new Error(`Knowledge guardrail policy '${basename(file)}' must not be empty.`);
+    return { sourcePath: relative(root, file), content };
   });
 }
 

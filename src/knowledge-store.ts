@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export type KnowledgeScope = "public" | "client";
@@ -200,10 +200,12 @@ const maxSnapshotProposals = 1_000;
 
 export class SqliteKnowledgeStore implements KnowledgeStore {
   private readonly database: DatabaseSync;
+  readonly path: string;
 
-  constructor(readonly scope: KnowledgeScope, readonly path: string) {
+  constructor(readonly scope: KnowledgeScope, path: string) {
     mkdirSync(dirname(path), { recursive: true });
-    this.database = new DatabaseSync(path);
+    this.path = secureSqlitePath(path);
+    this.database = new DatabaseSync(this.path);
     this.database.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;");
     this.database.exec("PRAGMA journal_mode=WAL;");
     this.migrate();
@@ -711,6 +713,20 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
   private audit(eventType: string, subjectId: string, detail: string, occurredAt: string): void {
     this.database.prepare("INSERT INTO audit_events (event_type, subject_id, detail, occurred_at) VALUES (?, ?, ?, ?)").run(eventType, subjectId, detail, occurredAt);
   }
+}
+
+function secureSqlitePath(path: string): string {
+  if (path === ":memory:") return path;
+  const parent = realpathSync(dirname(path));
+  const safePath = join(parent, basename(path));
+  for (const candidate of [safePath, `${safePath}-wal`, `${safePath}-shm`, `${safePath}-journal`]) {
+    if (existsSync(candidate) && lstatSync(candidate).isSymbolicLink()) throw new Error("SQLite database files must not be symbolic links.");
+  }
+  if (!existsSync(safePath)) {
+    const descriptor = openSync(safePath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    closeSync(descriptor);
+  }
+  return safePath;
 }
 
 function stableId(namespace: string, value: string): string {
