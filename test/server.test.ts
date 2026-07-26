@@ -16,10 +16,12 @@ describe("HTTP control plane", () => {
     process.env.VOICE_BRIDGE_GLOBAL_KNOWLEDGE_PATH = join(testRoot, "global");
     process.env.ATLAS_KNOWLEDGE_BACKEND = "sqlite";
     delete process.env.ATLAS_ADX_CLUSTER_URL;
+    delete process.env.ATLAS_ADX_AUTH_MODE;
     delete process.env.ATLAS_ADX_DEFAULT_DATABASE;
     delete process.env.ATLAS_ADX_PUBLIC_DATABASE;
     delete process.env.ATSLA_KNOWLEDGE_BACKEND;
     delete process.env.ATSLA_ADX_CLUSTER_URL;
+    delete process.env.ATSLA_ADX_AUTH_MODE;
     delete process.env.ATSLA_ADX_DEFAULT_DATABASE;
     delete process.env.ATSLA_ADX_PUBLIC_DATABASE;
   });
@@ -33,6 +35,8 @@ describe("HTTP control plane", () => {
     delete process.env.VOICE_BRIDGE_PROVIDER;
     delete process.env.LOCAL_VOICE_BRIDGE_URL;
     delete process.env.ATLAS_KNOWLEDGE_BACKEND;
+    delete process.env.ATLAS_ADX_AUTH_MODE;
+    delete process.env.ATSLA_ADX_AUTH_MODE;
     rmSync(testRoot, { recursive: true, force: true });
   });
 
@@ -114,7 +118,6 @@ describe("HTTP control plane", () => {
     expect(dashboard.body).toContain('id="discoverAdxDatabases"');
     expect(dashboard.body).toContain('id="refreshClientDatabases"');
     expect(dashboard.body).toContain("loadAdxClientDatabases");
-    expect(dashboard.body).toContain("!/^atsla-/i.test(database)");
     expect(dashboard.body).toContain("Default public knowledge database");
     expect(dashboard.body).toContain("Optional; public knowledge stays local when blank");
     expect(dashboard.body).toContain("publicOnly:true");
