@@ -319,6 +319,13 @@ function validateRemoteSnapshot(snapshot: KnowledgeSnapshot, expectedScope?: Kno
 }
 
 function isMissingTableError(error: unknown): boolean {
-  const text = error instanceof Error ? error.message : String(error);
+  const responseData = error && typeof error === "object" && "response" in error
+    ? (error as { response?: { data?: unknown } }).response?.data
+    : undefined;
+  const text = `${error instanceof Error ? error.message : String(error)} ${safeErrorJson(responseData)}`;
   return /AtslaKnowledgeSnapshots|table.*not.*found|semantic error/i.test(text);
+}
+
+function safeErrorJson(value: unknown): string {
+  try { return JSON.stringify(value); } catch { return ""; }
 }

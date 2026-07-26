@@ -113,6 +113,19 @@ describe("ADX knowledge repository", () => {
     await expect(repository.pullSnapshot("client-database", "client", "northwind-client")).resolves.toEqual(payload);
   });
 
+  it("treats a nested Azure semantic missing-table response as an empty database", async () => {
+    const client = new FakeAdxClient(["new-client"]);
+    client.execute = async () => {
+      const error = Object.assign(new Error("Request failed with status code 400"), {
+        response: { data: { error: { "@message": "Semantic error: Failed to resolve table named 'AtslaKnowledgeSnapshots'" } } },
+      });
+      throw error;
+    };
+    const repository = new AdxKnowledgeRepository({ clusterUrl: "https://example.southcentralus.kusto.windows.net", authMode: "azure-cli" }, client);
+
+    await expect(repository.pullSnapshot("new-client", "client", "new-client")).resolves.toBeUndefined();
+  });
+
   it("materializes remote knowledge, refreshes local imports, and pushes the merged snapshot", async () => {
     const root = mkdtempSync(join(tmpdir(), "atsla-adx-materialization-"));
     const local = new SqliteKnowledgeStore("client", join(root, "client.sqlite"));
